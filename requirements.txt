@@ -1,0 +1,7 @@
+praw==7.7.1. # python reddit api wrapper
+pandas==2.2.2
+pyyaml==6.0.2
+tqdm==4.66.5. # for progress bars
+snscrape==0.7.0.20230622. # for twitter scraping
+beautifulsoup4==4.12.3. # for scraping from mob blogs/forums
+requests==2.32.3
