@@ -9,8 +9,7 @@ import praw
 import pandas as pd
 
 import time
-from prawcore.exceptions import TooManyRequests
-from prawcore.exceptions import Redirect
+from prawcore.exceptions import TooManyRequests, NotFound, Forbidden, Redirect
 
 
 # keywords to search for
@@ -102,10 +101,13 @@ def fetch_reddit(client_id: str, client_secret: str, user_agent: str,
     for sub in subreddits:
         try:
             sr = reddit.subreddit(sub)
-            # touch the sub once to validate it exists
+            # validate access once; some subs can 404/403/redirect
             _ = next(sr.new(limit=1), None)
         except Redirect:
-            print(f"[skip] subreddit '{sub}' not found; skipping.", flush=True)
+            print(f"[skip] subreddit '{sub}' not found (redirect); skipping.", flush=True)
+            continue
+        except (NotFound, Forbidden):
+            print(f"[skip] subreddit '{sub}' not accessible (404/403); skipping.", flush=True)
             continue
         sr = reddit.subreddit(sub)
         for kw in keywords:
