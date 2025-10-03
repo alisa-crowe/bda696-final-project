@@ -10,18 +10,19 @@ import pandas as pd
 
 import time
 from prawcore.exceptions import TooManyRequests
+from prawcore.exceptions import Redirect
 
 
 # keywords to search for
 
 SUBREDDITS = [
     "baseball", "mlb", "fantasybaseball",
-    "nyyankees","Mets","redsox","orioles","raysbaseball",
-    "phillies","Braves","Nats","letsgofish",
+    "nyyankees","NewYorkMets","redsox","Orioles","TampaBayRays",
+    "phillies","Braves","Nationals","letsgofish",
     "Dodgers","SFGiants","Padres","azdiamondbacks","ColoradoRockies",
     "Astros","TexasRangers","Mariners","OaklandAthletics","angelsbaseball",
-    "minnesotatwins","kansascityroyals","clevelandguardians","ChWhiteSox","motorcitykitties",
-    "chicubs","cardinals","Brewers","bucs","reds",
+    "minnesotatwins","kansascityroyals","clevelandguardians","whitesox","motorcitykitties",
+    "chicubs","cardinals","Brewers","buccos","reds",
 ]
 
 TEAMS = {
@@ -99,6 +100,13 @@ def fetch_reddit(client_id: str, client_secret: str, user_agent: str,
 
     rows = []
     for sub in subreddits:
+        try:
+            sr = reddit.subreddit(sub)
+            # touch the sub once to validate it exists
+            _ = next(sr.new(limit=1), None)
+        except Redirect:
+            print(f"[skip] subreddit '{sub}' not found; skipping.", flush=True)
+            continue
         sr = reddit.subreddit(sub)
         for kw in keywords:
             print(f"[{sub}] searching: {kw}", flush=True)  # progress output
