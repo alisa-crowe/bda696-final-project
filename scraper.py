@@ -5,21 +5,24 @@ import re
 from pathlib import Path
 from typing import Dict, List
 import praw
+
 import pandas as pd
+
+import time
+from prawcore.exceptions import TooManyRequests
+
 
 # keywords to search for
 
-# SUBREDDITS = [
-#     "baseball", "mlb", "fantasybaseball",
-#     "nyyankees","Mets","redsox","orioles","raysbaseball",
-#     "phillies","Braves","Nats","letsgofish",
-#     "Dodgers","SFGiants","Padres","azdiamondbacks","ColoradoRockies",
-#     "Astros","TexasRangers","Mariners","OaklandAthletics","angelsbaseball",
-#     "minnesotatwins","kansascityroyals","clevelandguardians","ChWhiteSox","motorcitykitties",
-#     "chicubs","cardinals","Brewers","bucs","reds",
-# ]
-
-SUBREDDITS = ["baseball"]  # TEMP: just one
+SUBREDDITS = [
+    "baseball", "mlb", "fantasybaseball",
+    "nyyankees","Mets","redsox","orioles","raysbaseball",
+    "phillies","Braves","Nats","letsgofish",
+    "Dodgers","SFGiants","Padres","azdiamondbacks","ColoradoRockies",
+    "Astros","TexasRangers","Mariners","OaklandAthletics","angelsbaseball",
+    "minnesotatwins","kansascityroyals","clevelandguardians","ChWhiteSox","motorcitykitties",
+    "chicubs","cardinals","Brewers","bucs","reds",
+]
 
 TEAMS = {
   "NYY": ["Yankees","NYY","NY Yankees","Bronx Bombers"],
@@ -63,7 +66,7 @@ def clean_text(text):
     return text
 
 def utc_iso(timestamp_utc):
-    return dt.datetime.utcfromtimestamp(timestamp_utc).replace(tzinfo=dt.timezone.utc).isoformat()
+    return dt.datetime.fromtimestamp(timestamp_utc, tz=dt.timezone.utc).isoformat()
 
 def all_keywords():
     seen, kws = set(), []
@@ -76,17 +79,29 @@ def all_keywords():
     return kws
 
 def fetch_reddit(client_id: str, client_secret: str, user_agent: str,
-                 limit: int, time_filter: str, include_comments: bool):
+                 limit: int, time_filter: str, include_comments: bool,
+                 keywords: list[str] | None = None,
+                 subreddits: list[str] | None = None,
+                 out_path: str | None = None):
 
-    reddit = praw.Reddit(client_id=client_id, client_secret=client_secret, user_agent=user_agent)
+    reddit = praw.Reddit(
+        client_id=client_id, 
+        client_secret=client_secret, 
+        user_agent=user_agent,
+        requestor_kwargs={"timeout": 15},  # seconds
+        )
 
-    # keywords = all_keywords()
-    keywords = ["Yankees"]  # TEMP: just one
+    if keywords is None or len(keywords) == 0:
+        keywords = all_keywords()  # fallback to all team aliases
+
+    if subreddits is None or len(subreddits) == 0:
+        subreddits = SUBREDDITS  # fallback to module-level default
 
     rows = []
-    for sub in SUBREDDITS:
+    for sub in subreddits:
         sr = reddit.subreddit(sub)
         for kw in keywords:
+            print(f"[{sub}] searching: {kw}", flush=True)  # progress output
             query = f'title:"{kw}" OR selftext:"{kw}"'
             for submission in sr.search(query=query, sort="new", time_filter=time_filter, limit=limit):
                 body = clean_text(f"{submission.title} {submission.selftext or ''}")
@@ -99,12 +114,11 @@ def fetch_reddit(client_id: str, client_secret: str, user_agent: str,
                     "text": body,
                     "permalink": f"https://reddit.com{submission.permalink}",
                     "created_utc": utc_iso(submission.created_utc),
-                    # store which keyword matched to filter later
                     "matched_keyword": kw,
                 })
                 if include_comments:
                     submission.comments.replace_more(limit=0)
-                    for c in submission.comments.list():
+                    for c in submission.comments[:20]:   # cap to first 20 top-level comments
                         c_body = clean_text(getattr(c, "body", "") or "")
                         if not c_body:
                             continue
@@ -117,6 +131,15 @@ def fetch_reddit(client_id: str, client_secret: str, user_agent: str,
                             "created_utc": utc_iso(c.created_utc),
                             "matched_keyword": kw,
                         })
+                if out_path and (len(rows) % 1000 == 0):
+                    pd.DataFrame(rows).to_csv(out_path, index=False)
+                    print(f"[checkpoint] wrote {len(rows)} rows so far...", flush=True)
+        # after finishing the whole subreddit
+        if out_path:
+            pd.DataFrame(rows).to_csv(out_path, index=False)
+            print(f"[checkpoint] wrote {len(rows)} rows after subreddit {sub}", flush=True)
+
+
 
     df = pd.DataFrame(rows).drop_duplicates(subset=["text","permalink"])
     # Optionally record length for quick QA
@@ -132,6 +155,10 @@ def main():
     ap.add_argument("--limit", type=int, default=50, help="Max posts per subreddit+keyword")
     ap.add_argument("--time-filter", default="week",
                     choices=["all","day","hour","month","week","year"])
+    
+    ap.add_argument("--keywords", nargs="+", help="One or more search keywords (e.g., --keywords Yankees Dodgers)")
+    ap.add_argument("--subs", nargs="+", help="Override subreddit list (e.g., --subs baseball mlb)")
+
     ap.add_argument("--include-comments", action="store_true")
     ap.add_argument("--out", default="reddit-teams.csv", help="Output CSV path")
     args = ap.parse_args()
@@ -143,6 +170,9 @@ def main():
         limit=args.limit,
         time_filter=args.time_filter,
         include_comments=args.include_comments,
+        keywords=args.keywords,
+        subreddits=args.subs,
+        out_path=args.out,
     )
 
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
