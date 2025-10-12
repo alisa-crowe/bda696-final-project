@@ -3,6 +3,8 @@ import re
 import pandas as pd
 from atproto import Client
 from atproto import models as AtpModels
+import json, os, time
+from pathlib import Path
 
 # config (same as Reddit scraper)
 SUBREDDITS = [
@@ -145,21 +147,56 @@ def fetch_bluesky(handle: str, password: str, keywords: list[str], limit_per_kw:
         df["char_len"] = df["text"].str.len()
     return df
 
-
 def main():
     ap = argparse.ArgumentParser(description="Collect Bluesky posts for MLB sentiment.")
-    ap.add_argument("--handle", required=True, help="acrowe3069.bsky.social")
+    ap.add_argument("--handle", required=True, help="e.g., acrowe3069.bsky.social")
     ap.add_argument("--app-password", required=True, help="Bluesky app password")
     ap.add_argument("--limit-per-kw", type=int, default=25)
     ap.add_argument("--out", default="bluesky-mlb.csv")
     ap.add_argument("--keywords", nargs="+", help="Optional override keyword list")
+
+    # New: scale + robustness
+    ap.add_argument("--checkpoint-every", type=int, default=1000, help="write interim checkpoint every N rows")
+    ap.add_argument("--state", default="bluesky_state.json", help="resume state file (cursor/fetched per keyword)")
+    ap.add_argument("--sleep-ms", type=int, default=200, help="sleep between pages to be polite")
+    ap.add_argument("--include-replies", action="store_true", help="also fetch replies to matched posts")
+
+    # Output options
+    ap.add_argument("--format", choices=["csv","parquet"], default="csv")
+    ap.add_argument("--append", action="store_true", help="append to existing output (dedup at end)")
     args = ap.parse_args()
 
     kws = args.keywords if args.keywords else all_keywords()
     print(f"[info] keywords: {len(kws)} total")
-    df = fetch_bluesky(args.handle, args.app_password, kws, limit_per_kw=args.limit_per_kw)
-    df.to_csv(args.out, index=False)
-    print(f"[done] wrote {args.out} with {len(df)} rows.")
+
+    # fetch with scaling/resume knobs
+    df = fetch_bluesky(
+        args.handle,
+        args.app_password,
+        kws,
+        limit_per_kw=args.limit_per_kw,
+        sleep_ms=args.sleep_ms,
+        checkpoint_every=args.checkpoint_every,
+        out_path=args.out,          # enables periodic checkpoint writes
+        state_path=args.state,      # enables resume
+        include_replies=args.include_replies,
+    )
+
+    # Append or write fresh
+    out = Path(args.out)
+    if args.append and out.exists():
+        if args.format == "csv":
+            prev = pd.read_csv(out)
+        else:
+            prev = pd.read_parquet(out)
+        df = pd.concat([prev, df], ignore_index=True).drop_duplicates(subset=["text","permalink"])
+
+    if args.format == "csv":
+        df.to_csv(out, index=False)
+    else:
+        df.to_parquet(out, index=False)
+
+    print(f"[done] wrote {out} with {len(df)} rows.")
 
 if __name__ == "__main__":
     main()
