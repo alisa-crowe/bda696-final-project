@@ -76,30 +76,106 @@ def uri_to_web(uri: str, did: str) -> str:
         return f"https://bsky.app/profile/{did}/post/{rkey}"
     except Exception:
         return uri
+    
+def load_state(path: str) -> dict:
+    if path and os.path.exists(path):
+        with open(path, "r") as f:
+            return json.load(f)
+    return {}
 
-def fetch_bluesky(handle: str, password: str, keywords: list[str], limit_per_kw: int = 50) -> pd.DataFrame:
+def save_state(path: str, state: dict):
+    if path:
+        with open(path, "w") as f:
+            json.dump(state, f)
+
+def checkpoint_write(df: pd.DataFrame, out_path: str):
+    tmp = out_path + ".tmp"
+    Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(tmp, index=False)
+    os.replace(tmp, out_path)
+
+def try_get_replies(client: Client, uri: str, did: str, kw: str) -> list[dict]:
+    rows = []
+    try:
+        thread = client.app.bsky.feed.get_post_thread({'uri': uri, 'depth': 2})
+        root = getattr(thread, "thread", None) or getattr(getattr(thread, "data", None), "thread", None)
+        if not root:
+            return rows
+        stack, seen = [root], set()
+        while stack and len(rows) < 50:
+            node = stack.pop()
+            post = getattr(node, "post", None)
+            if not post:
+                continue
+            post_uri = getattr(post, "uri", None)
+            if not post_uri or post_uri in seen:
+                continue
+            seen.add(post_uri)
+            arec = getattr(post, "record", None)
+            text = clean_text(getattr(arec, "text", "") or "")
+            author = getattr(post, "author", None)
+            handle_out = getattr(author, "handle", None) if author else None
+            did_out = getattr(author, "did", None) if author else None
+            created = getattr(post, "indexed_at", None) or getattr(arec, "created_at", None)
+            created_iso = utc_iso_from_str(created) if created else None
+            permalink = uri_to_web(post_uri, did_out) if (post_uri and did_out) else (post_uri or "")
+            if text:
+                rows.append({
+                    "source": "bluesky_reply",
+                    "subreddit": "bluesky",
+                    "author": handle_out,
+                    "text": text,
+                    "permalink": permalink,
+                    "created_utc": created_iso,
+                    "matched_keyword": kw,
+                })
+            # children may be under replies/children depending on SDK version
+            children = getattr(node, "replies", []) or getattr(node, "children", [])
+            for ch in children:
+                stack.append(ch)
+    except Exception:
+        pass
+    return rows
+
+def fetch_bluesky(
+    handle: str,
+    password: str,
+    keywords: list[str],
+    limit_per_kw: int = 50,
+    sleep_ms: int = 200,
+    checkpoint_every: int = 1000,
+    out_path: str | None = None,
+    state_path: str | None = None,
+    include_replies: bool = False,
+) -> pd.DataFrame:
     client = Client()
     client.login(handle, password)
 
-    rows = []
+    rows: list[dict] = []
+    state = load_state(state_path) if state_path else {}
+
     for kw in keywords:
-        fetched = 0
-        cursor = None
+        fetched = int(state.get(kw, {}).get("fetched", 0))
+        cursor = state.get(kw, {}).get("cursor", None)
+
         while fetched < limit_per_kw:
             params = AtpModels.AppBskyFeedSearchPosts.Params(
-                q=kw,
-                sort="latest",
+                q=kw, sort="latest",
                 limit=min(100, limit_per_kw - fetched),
                 cursor=cursor,
             )
-            resp = client.app.bsky.feed.search_posts(params)
+            # basic retry
+            for attempt in range(3):
+                try:
+                    resp = client.app.bsky.feed.search_posts(params)
+                    break
+                except Exception:
+                    if attempt == 2:
+                        raise
+                    time.sleep(0.5 * (attempt + 1))
 
-            # SDK response can be resp.posts or resp.data.posts depending on version
-            posts = getattr(resp, "posts", None)
-            if posts is None:
-                data = getattr(resp, "data", None)
-                posts = getattr(data, "posts", []) if data else []
-
+            data = getattr(resp, "data", None)
+            posts = getattr(resp, "posts", None) or (getattr(data, "posts", []) if data else [])
             if not posts:
                 break
 
@@ -116,7 +192,6 @@ def fetch_bluesky(handle: str, password: str, keywords: list[str], limit_per_kw:
                 did = getattr(author, "did", None) if author else None
                 uri = getattr(post, "uri", None)
                 permalink = uri_to_web(uri, did) if (uri and did) else (uri or "")
-
                 created = getattr(post, "indexed_at", None) or getattr(rec, "created_at", None)
                 created_iso = utc_iso_from_str(created) if created else None
 
@@ -129,18 +204,30 @@ def fetch_bluesky(handle: str, password: str, keywords: list[str], limit_per_kw:
                     "created_utc": created_iso,
                     "matched_keyword": kw,
                 })
-
                 fetched += 1
+
+                if include_replies and uri and did:
+                    rows.extend(try_get_replies(client, uri, did, kw))
+
+                if out_path and (len(rows) % checkpoint_every == 0):
+                    df_ck = pd.DataFrame(rows).drop_duplicates(subset=["text", "permalink"])
+                    checkpoint_write(df_ck, out_path)
+                    state[kw] = {"cursor": cursor, "fetched": fetched}
+                    save_state(state_path, state)
+
                 if fetched >= limit_per_kw:
                     break
 
-            # advance cursor (SDK may put it on resp.cursor or resp.data.cursor)
+            # advance cursor
             cursor = getattr(resp, "cursor", None)
             if cursor is None:
-                data = getattr(resp, "data", None)
-                cursor = getattr(data, "cursor", None)
-            if not cursor:
-                break
+                cursor = getattr(getattr(resp, "data", None), "cursor", None)
+
+            # persist progress for this keyword
+            state[kw] = {"cursor": cursor, "fetched": fetched}
+            save_state(state_path, state)
+
+            time.sleep(max(0, sleep_ms) / 1000.0)
 
     df = pd.DataFrame(rows).drop_duplicates(subset=["text", "permalink"])
     if not df.empty:
