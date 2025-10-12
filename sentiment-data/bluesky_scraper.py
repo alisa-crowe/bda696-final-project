@@ -2,6 +2,7 @@ import argparse
 import re
 import pandas as pd
 from atproto import Client
+from atproto import models as AtpModels
 
 # config (same as Reddit scraper)
 SUBREDDITS = [
@@ -80,40 +81,70 @@ def fetch_bluesky(handle: str, password: str, keywords: list[str], limit_per_kw:
 
     rows = []
     for kw in keywords:
-        resp = client.app.bsky.feed.search_posts(q=kw, sort="latest", limit=min(limit_per_kw, 100))
-        posts = getattr(resp, "posts", None)
-        if posts is None:
-            data = getattr(resp, "data", None)
-            posts = (data.posts if (data and hasattr(data, "posts")) else [])
-        for post in posts:
-            rec = getattr(post, "record", None)
-            if not rec: 
-                continue
-            text = clean_text(getattr(rec, "text", "") or "")
-            if not text:
-                continue
-            author = getattr(post, "author", None)
-            handle_out = getattr(author, "handle", None) if author else None
-            did = getattr(author, "did", None) if author else None
-            uri = getattr(post, "uri", None)
-            permalink = uri_to_web(uri, did) if (uri and did) else (uri or "")
-            created = getattr(post, "indexed_at", None) or getattr(rec, "created_at", None)
-            created_iso = utc_iso_from_str(created) if created else None
+        fetched = 0
+        cursor = None
+        while fetched < limit_per_kw:
+            params = AtpModels.AppBskyFeedSearchPosts.Params(
+                q=kw,
+                sort="latest",
+                limit=min(100, limit_per_kw - fetched),
+                cursor=cursor,
+            )
+            resp = client.app.bsky.feed.search_posts(params)
 
-            rows.append({
-                "source": "bluesky_post",
-                "subreddit": "bluesky",
-                "author": handle_out,
-                "text": text,
-                "permalink": permalink,
-                "created_utc": created_iso,
-                "matched_keyword": kw,
-            })
+            # SDK response can be resp.posts or resp.data.posts depending on version
+            posts = getattr(resp, "posts", None)
+            if posts is None:
+                data = getattr(resp, "data", None)
+                posts = getattr(data, "posts", []) if data else []
+
+            if not posts:
+                break
+
+            for post in posts:
+                rec = getattr(post, "record", None)
+                if not rec:
+                    continue
+                text = clean_text(getattr(rec, "text", "") or "")
+                if not text:
+                    continue
+
+                author = getattr(post, "author", None)
+                handle_out = getattr(author, "handle", None) if author else None
+                did = getattr(author, "did", None) if author else None
+                uri = getattr(post, "uri", None)
+                permalink = uri_to_web(uri, did) if (uri and did) else (uri or "")
+
+                created = getattr(post, "indexed_at", None) or getattr(rec, "created_at", None)
+                created_iso = utc_iso_from_str(created) if created else None
+
+                rows.append({
+                    "source": "bluesky_post",
+                    "subreddit": "bluesky",
+                    "author": handle_out,
+                    "text": text,
+                    "permalink": permalink,
+                    "created_utc": created_iso,
+                    "matched_keyword": kw,
+                })
+
+                fetched += 1
+                if fetched >= limit_per_kw:
+                    break
+
+            # advance cursor (SDK may put it on resp.cursor or resp.data.cursor)
+            cursor = getattr(resp, "cursor", None)
+            if cursor is None:
+                data = getattr(resp, "data", None)
+                cursor = getattr(data, "cursor", None)
+            if not cursor:
+                break
 
     df = pd.DataFrame(rows).drop_duplicates(subset=["text", "permalink"])
     if not df.empty:
         df["char_len"] = df["text"].str.len()
     return df
+
 
 def main():
     ap = argparse.ArgumentParser(description="Collect Bluesky posts for MLB sentiment.")
