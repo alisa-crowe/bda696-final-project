@@ -1,14 +1,9 @@
-from atproto import Client
-import pandas as pd
-import datetime as dt
+import argparse
 import re
+import pandas as pd
+from atproto import Client
 
-# api info
-client = Client()
-client.login("acrowe3069.bsky.social", "5bfw-b2i5-yv6j-i2m6")  # bluesky handle, app password
-
-# search config
-
+# config (same as Reddit scraper)
 SUBREDDITS = [
     "baseball","mlb","fantasybaseball","nyyankees","NewYorkMets","redsox","Orioles","TampaBayRays",
     "phillies","Braves","Nationals","letsgofish","Dodgers","SFGiants","Padres","azdiamondbacks",
@@ -48,9 +43,9 @@ TEAMS = {
   "CHW": ["White Sox","CHW","ChiSox","Sox (Chicago)"],
   "DET": ["Tigers","DET","Detroit Tigers"],
 }
+
 def all_keywords():
     seen, kws = set(), []
-    # include subreddit names as keywords (your request)
     for s in SUBREDDITS:
         sl = s.lower()
         if sl not in seen:
@@ -63,54 +58,77 @@ def all_keywords():
     return kws
 
 # helper functions
-
 def clean_text(text: str) -> str:
     if not text:
         return ""
-    # collapse whitespace
     return re.sub(r"\s+", " ", text).strip()
 
-def utc_iso_from_str(timestr: str) -> str:
-    # timestr is something like "2025-10-09T12:34:56Z"
-    # convert to ISO with timezone
-    return pd.to_datetime(timestr, utc=True).isoformat()
+def utc_iso_from_str(ts: str) -> str:
+    return pd.to_datetime(ts, utc=True).isoformat()
 
-def fetch_bluesky(handle: str, password: str,
-                   keywords: list[str],
-                   limit_per_kw: int = 100) -> pd.DataFrame:
-    """
-    Fetch Bluesky posts matching any of the keywords.
-    Returns a DataFrame with columns similar to your Reddit fetch: 
-    source, subreddit, author, text, permalink, created_utc, matched_keyword.
-    """
+def uri_to_web(uri: str, did: str) -> str:
+    # at://did:plc:.../app.bsky.feed.post/<rkey> -> https://bsky.app/profile/<did>/post/<rkey>
+    try:
+        rkey = uri.split("/")[-1]
+        return f"https://bsky.app/profile/{did}/post/{rkey}"
+    except Exception:
+        return uri
+
+def fetch_bluesky(handle: str, password: str, keywords: list[str], limit_per_kw: int = 50) -> pd.DataFrame:
     client = Client()
     client.login(handle, password)
 
     rows = []
     for kw in keywords:
-        # Use the search posts API (bsky.feed.searchPosts or equivalent)
-        resp = client.app.bsky.feed.search_posts(q=kw, sort="latest", limit=limit_per_kw)
-        # `resp` will contain posts with metadata
-        for post in resp.posts:
-            rec = post.record
-            text = clean_text(rec.text or "")
+        resp = client.app.bsky.feed.search_posts(q=kw, sort="latest", limit=min(limit_per_kw, 100))
+        posts = getattr(resp, "posts", None)
+        if posts is None:
+            data = getattr(resp, "data", None)
+            posts = (data.posts if (data and hasattr(data, "posts")) else [])
+        for post in posts:
+            rec = getattr(post, "record", None)
+            if not rec: 
+                continue
+            text = clean_text(getattr(rec, "text", "") or "")
             if not text:
                 continue
-            # The post.uri is something like "at://did:plc:.../app.bsky.feed.post/…” 
-            uri = post.uri
-            # To build a permalink human-clickable, you can map `did` and `rkey`
-            # but many clients accept the at:// URI directly or as a web URL.
-            # For simplicity, we use `post.uri` as the permalink column.
+            author = getattr(post, "author", None)
+            handle_out = getattr(author, "handle", None) if author else None
+            did = getattr(author, "did", None) if author else None
+            uri = getattr(post, "uri", None)
+            permalink = uri_to_web(uri, did) if (uri and did) else (uri or "")
+            created = getattr(post, "indexed_at", None) or getattr(rec, "created_at", None)
+            created_iso = utc_iso_from_str(created) if created else None
+
             rows.append({
                 "source": "bluesky_post",
-                "subreddit": "bluesky",  # for compatibility with your pipeline
-                "author": post.author.handle,
+                "subreddit": "bluesky",
+                "author": handle_out,
                 "text": text,
-                "permalink": uri,
-                "created_utc": utc_iso_from_str(post.indexed_at),
+                "permalink": permalink,
+                "created_utc": created_iso,
                 "matched_keyword": kw,
             })
+
     df = pd.DataFrame(rows).drop_duplicates(subset=["text", "permalink"])
     if not df.empty:
         df["char_len"] = df["text"].str.len()
     return df
+
+def main():
+    ap = argparse.ArgumentParser(description="Collect Bluesky posts for MLB sentiment.")
+    ap.add_argument("--handle", required=True, help="acrowe3069.bsky.social")
+    ap.add_argument("--app-password", required=True, help="Bluesky app password")
+    ap.add_argument("--limit-per-kw", type=int, default=25)
+    ap.add_argument("--out", default="bluesky-mlb.csv")
+    ap.add_argument("--keywords", nargs="+", help="Optional override keyword list")
+    args = ap.parse_args()
+
+    kws = args.keywords if args.keywords else all_keywords()
+    print(f"[info] keywords: {len(kws)} total")
+    df = fetch_bluesky(args.handle, args.app_password, kws, limit_per_kw=args.limit_per_kw)
+    df.to_csv(args.out, index=False)
+    print(f"[done] wrote {args.out} with {len(df)} rows.")
+
+if __name__ == "__main__":
+    main()
