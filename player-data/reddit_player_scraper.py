@@ -27,9 +27,39 @@ def clean_text(text: str) -> str:
 def utc_iso(ts_utc: float) -> str:
     return dt.datetime.fromtimestamp(ts_utc, tz=dt.timezone.utc).isoformat()
 
+def build_name_variants(name: str) -> list[str]:
+    # 1) as-is
+    variants = [name]
+
+    # 2) no periods: "A. J. Burnett" -> "A J Burnett", and compact: "AJ Burnett"
+    no_dots = name.replace(".", "")
+    if no_dots != name:
+        variants.append(no_dots)                 # "A J Burnett"
+        compact = re.sub(r"\b([A-Za-z])\s+(?=[A-Za-z]\b)", r"\1", no_dots)  # "AJ Burnett"
+        compact = re.sub(r"\b([A-Za-z]{2,})\s+([A-Za-z]{2,})\b", r"\1 \2", compact)  # keep words spaced
+        variants.append(compact)
+
+    # 3) collapse extra spaces
+    variants = [re.sub(r"\s+", " ", v).strip() for v in variants]
+
+    # de-duplicate while preserving order
+    seen = set(); out = []
+    for v in variants:
+        if v.lower() not in seen:
+            seen.add(v.lower()); out.append(v)
+    return out
+
+
 def search_query_for_player(name: str) -> str:
-    # exact phrase match in title or body
-    return f'title:"{name}" OR selftext:"{name}"'
+    # mix of quoted (precise) and unquoted (looser) forms
+    vars_ = build_name_variants(name)
+    parts = []
+    for v in vars_:
+        v_esc = v.replace('"', '\\"')
+        parts.append(f'title:"{v_esc}" OR selftext:"{v_esc}"')  # precise
+        # also include an unquoted fallback term to catch “AJ” joins etc.
+        parts.append(f'title:{v_esc} OR selftext:{v_esc}')
+    return " OR ".join(parts)
 
 def fetch_reddit_players(
     client_id: str,
