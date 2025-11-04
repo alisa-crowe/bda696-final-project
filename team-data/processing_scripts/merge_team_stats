@@ -1,0 +1,155 @@
+import pandas as pd
+
+# --- Load cleaned Reddit dataset ---
+df = pd.read_csv("../reddit_team_data.csv")
+df["year"] = pd.to_datetime(df["created_utc"]).dt.year
+
+# --- 2025 regular-season stats for the 17 teams in our dataset ---
+# Source: compiled from publicly available 2025 MLB data (regular season only)
+team_stats = {
+    ("Los Angeles Angels", 2025): {
+        "wins": 72, "losses": 90, "win_pct": 0.444, "runs_scored": 673,
+        "runs_allowed": 751, "run_diff": -78, "HR": 226, "AVG": 0.246,
+        "OBP": 0.312, "SLG": 0.403, "OPS": 0.715, "ERA": 4.56, "WHIP": 1.36,
+        "K_per_9": 8.5, "BB_per_9": 3.4, "E": 82, "FldPct": 0.984,
+        "TeamPayroll": 164.2, "make_playoffs": "No"
+    },
+    ("Los Angeles Dodgers", 2025): {
+        "wins": 93, "losses": 69, "win_pct": 0.574, "runs_scored": 825,
+        "runs_allowed": 676, "run_diff": 149, "HR": 244, "AVG": 0.258,
+        "OBP": 0.334, "SLG": 0.449, "OPS": 0.783, "ERA": 3.71, "WHIP": 1.19,
+        "K_per_9": 9.1, "BB_per_9": 2.8, "E": 68, "FldPct": 0.988,
+        "TeamPayroll": 304.7, "make_playoffs": "Yes"
+    },
+    ("Miami Marlins", 2025): {
+        "wins": 69, "losses": 93, "win_pct": 0.426, "runs_scored": 709,
+        "runs_allowed": 771, "run_diff": -62, "HR": 154, "AVG": 0.247,
+        "OBP": 0.312, "SLG": 0.396, "OPS": 0.708, "ERA": 4.48, "WHIP": 1.33,
+        "K_per_9": 8.6, "BB_per_9": 3.1, "E": 86, "FldPct": 0.983,
+        "TeamPayroll": 93.1, "make_playoffs": "No"
+    },
+    ("Milwaukee Brewers", 2025): {
+        "wins": 97, "losses": 65, "win_pct": 0.599, "runs_scored": 806,
+        "runs_allowed": 681, "run_diff": 125, "HR": 205, "AVG": 0.254,
+        "OBP": 0.325, "SLG": 0.419, "OPS": 0.744, "ERA": 3.76, "WHIP": 1.24,
+        "K_per_9": 8.9, "BB_per_9": 2.9, "E": 75, "FldPct": 0.987,
+        "TeamPayroll": 132.5, "make_playoffs": "Yes"
+    },
+    ("Minnesota Twins", 2025): {
+        "wins": 70, "losses": 92, "win_pct": 0.432, "runs_scored": 678,
+        "runs_allowed": 751, "run_diff": -73, "HR": 191, "AVG": 0.243,
+        "OBP": 0.312, "SLG": 0.398, "OPS": 0.710, "ERA": 4.43, "WHIP": 1.32,
+        "K_per_9": 8.7, "BB_per_9": 3.2, "E": 85, "FldPct": 0.984,
+        "TeamPayroll": 139.7, "make_playoffs": "No"
+    },
+    ("New York Mets", 2025): {
+        "wins": 83, "losses": 79, "win_pct": 0.512, "runs_scored": 766,
+        "runs_allowed": 742, "run_diff": 24, "HR": 224, "AVG": 0.249,
+        "OBP": 0.324, "SLG": 0.421, "OPS": 0.745, "ERA": 4.15, "WHIP": 1.29,
+        "K_per_9": 8.9, "BB_per_9": 3.1, "E": 79, "FldPct": 0.986,
+        "TeamPayroll": 287.3, "make_playoffs": "No"
+    },
+    ("New York Yankees", 2025): {
+        "wins": 94, "losses": 68, "win_pct": 0.580, "runs_scored": 849,
+        "runs_allowed": 689, "run_diff": 160, "HR": 274, "AVG": 0.254,
+        "OBP": 0.328, "SLG": 0.453, "OPS": 0.781, "ERA": 3.79, "WHIP": 1.22,
+        "K_per_9": 9.3, "BB_per_9": 2.8, "E": 78, "FldPct": 0.986,
+        "TeamPayroll": 298.5, "make_playoffs": "Yes"
+    },
+    ("Oakland Athletics", 2025): {
+        "wins": 76, "losses": 86, "win_pct": 0.469, "runs_scored": 733,
+        "runs_allowed": 774, "run_diff": -41, "HR": 219, "AVG": 0.246,
+        "OBP": 0.318, "SLG": 0.404, "OPS": 0.722, "ERA": 4.27, "WHIP": 1.31,
+        "K_per_9": 8.5, "BB_per_9": 3.3, "E": 91, "FldPct": 0.982,
+        "TeamPayroll": 91.4, "make_playoffs": "No"
+    },
+    ("Philadelphia Phillies", 2025): {
+        "wins": 96, "losses": 66, "win_pct": 0.593, "runs_scored": 778,
+        "runs_allowed": 684, "run_diff": 94, "HR": 212, "AVG": 0.256,
+        "OBP": 0.329, "SLG": 0.438, "OPS": 0.767, "ERA": 3.89, "WHIP": 1.26,
+        "K_per_9": 9.0, "BB_per_9": 2.9, "E": 70, "FldPct": 0.988,
+        "TeamPayroll": 243.6, "make_playoffs": "Yes"
+    },
+    ("Pittsburgh Pirates", 2025): {
+        "wins": 71, "losses": 91, "win_pct": 0.438, "runs_scored": 583,
+        "runs_allowed": 711, "run_diff": -128, "HR": 117, "AVG": 0.239,
+        "OBP": 0.304, "SLG": 0.368, "OPS": 0.672, "ERA": 4.82, "WHIP": 1.37,
+        "K_per_9": 8.3, "BB_per_9": 3.5, "E": 94, "FldPct": 0.981,
+        "TeamPayroll": 95.7, "make_playoffs": "No"
+    },
+    ("San Diego Padres", 2025): {
+        "wins": 90, "losses": 72, "win_pct": 0.556, "runs_scored": 702,
+        "runs_allowed": 648, "run_diff": 54, "HR": 152, "AVG": 0.252,
+        "OBP": 0.323, "SLG": 0.414, "OPS": 0.737, "ERA": 3.94, "WHIP": 1.25,
+        "K_per_9": 8.8, "BB_per_9": 3.0, "E": 72, "FldPct": 0.987,
+        "TeamPayroll": 223.4, "make_playoffs": "Yes"
+    },
+    ("San Francisco Giants", 2025): {
+        "wins": 81, "losses": 81, "win_pct": 0.500, "runs_scored": 705,
+        "runs_allowed": 709, "run_diff": -4, "HR": 173, "AVG": 0.245,
+        "OBP": 0.316, "SLG": 0.394, "OPS": 0.710, "ERA": 4.12, "WHIP": 1.29,
+        "K_per_9": 8.6, "BB_per_9": 3.2, "E": 83, "FldPct": 0.985,
+        "TeamPayroll": 190.2, "make_playoffs": "No"
+    },
+    ("Seattle Mariners", 2025): {
+        "wins": 90, "losses": 72, "win_pct": 0.556, "runs_scored": 766,
+        "runs_allowed": 688, "run_diff": 78, "HR": 238, "AVG": 0.249,
+        "OBP": 0.322, "SLG": 0.426, "OPS": 0.748, "ERA": 3.81, "WHIP": 1.21,
+        "K_per_9": 9.2, "BB_per_9": 2.8, "E": 69, "FldPct": 0.988,
+        "TeamPayroll": 182.3, "make_playoffs": "Yes"
+    },
+    ("St. Louis Cardinals", 2025): {
+        "wins": 78, "losses": 84, "win_pct": 0.481, "runs_scored": 689,
+        "runs_allowed": 701, "run_diff": -12, "HR": 148, "AVG": 0.248,
+        "OBP": 0.317, "SLG": 0.389, "OPS": 0.706, "ERA": 4.15, "WHIP": 1.32,
+        "K_per_9": 8.4, "BB_per_9": 3.3, "E": 80, "FldPct": 0.986,
+        "TeamPayroll": 175.8, "make_playoffs": "No"
+    },
+    ("Tampa Bay Rays", 2025): {
+        "wins": 81, "losses": 81, "win_pct": 0.500, "runs_scored": 714,
+        "runs_allowed": 714, "run_diff": 0, "HR": 182, "AVG": 0.247,
+        "OBP": 0.317, "SLG": 0.400, "OPS": 0.717, "ERA": 4.09, "WHIP": 1.26,
+        "K_per_9": 8.9, "BB_per_9": 3.0, "E": 77, "FldPct": 0.987,
+        "TeamPayroll": 109.3, "make_playoffs": "No"
+    },
+    ("Texas Rangers", 2025): {
+        "wins": 81, "losses": 81, "win_pct": 0.500, "runs_scored": 684,
+        "runs_allowed": 685, "run_diff": -1, "HR": 175, "AVG": 0.250,
+        "OBP": 0.323, "SLG": 0.412, "OPS": 0.735, "ERA": 4.12, "WHIP": 1.28,
+        "K_per_9": 8.7, "BB_per_9": 3.0, "E": 76, "FldPct": 0.986,
+        "TeamPayroll": 245.6, "make_playoffs": "No"
+    },
+    ("Toronto Blue Jays", 2025): {
+        "wins": 94, "losses": 68, "win_pct": 0.580, "runs_scored": 778,
+        "runs_allowed": 661, "run_diff": 117, "HR": 224, "AVG": 0.254,
+        "OBP": 0.328, "SLG": 0.435, "OPS": 0.763, "ERA": 3.84, "WHIP": 1.24,
+        "K_per_9": 9.0, "BB_per_9": 2.9, "E": 71, "FldPct": 0.987,
+        "TeamPayroll": 236.8, "make_playoffs": "Yes"
+    },
+    ("Washington Nationals", 2025): {
+        "wins": 66, "losses": 96, "win_pct": 0.407, "runs_scored": 687,
+        "runs_allowed": 820, "run_diff": -133, "HR": 161, "AVG": 0.242,
+        "OBP": 0.309, "SLG": 0.384, "OPS": 0.693, "ERA": 4.95, "WHIP": 1.39,
+        "K_per_9": 8.2, "BB_per_9": 3.6, "E": 95, "FldPct": 0.981,
+        "TeamPayroll": 118.4, "make_playoffs": "No"
+    }
+}
+
+# --- Automatically create prefixed columns ---
+all_stat_keys = sorted({k for stats in team_stats.values() for k in stats.keys()})
+prefixed_cols = [f"team_{key}" for key in all_stat_keys]
+
+for col in prefixed_cols:
+    if col not in df.columns:
+        df[col] = None
+
+# --- Populate stats ---
+for idx, row in df.iterrows():
+    stats = team_stats.get((row["matched_keyword"], row["year"]), {})
+    for key, val in stats.items():
+        df.at[idx, f"team_{key}"] = val
+
+# --- Save updates in place ---
+df.to_csv("../reddit_team_data.csv", index=False)
+print(f"Updated columns: {', '.join(prefixed_cols)}")
+print("reddit_team_data.csv updated with 2025 regular-season team stats and playoff flags.")
