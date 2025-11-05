@@ -1,0 +1,14 @@
+import pandas as pd
+
+# Load the dataset
+df = pd.read_csv("../bluesky_team_data.csv")
+
+# Drop rows where matched_keyword is missing
+df = df.dropna(subset=["matched_keyword"])
+
+# Verify the result
+print(f"Remaining rows: {len(df)}")
+
+# Save the cleaned dataset back in place
+df.to_csv("../bluesky_team_data.csv", index=False)
+print("Removed rows with missing matched_keyword and saved updated dataset.")
