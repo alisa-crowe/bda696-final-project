@@ -1,0 +1,12 @@
+import pandas as pd
+
+# Load your Bluesky dataset
+df = pd.read_csv("../reddit_team_data.csv")
+
+# Drop missing values and get unique team names
+unique_teams = sorted(df["matched_keyword"].dropna().unique())
+
+# Print the count and each team
+print(f"Total unique team names: {len(unique_teams)}\n")
+for team in unique_teams:
+    print(team)
