@@ -1,0 +1,92 @@
+import pandas as pd
+import re
+from rapidfuzz import process, fuzz
+
+# --- File paths ---
+reddit_path = "../reddit_player_data.csv"
+roster_path = "../team_rosters_cleaned.xlsx"
+
+# --- Load data ---
+reddit_df = pd.read_csv(reddit_path)
+roster_df = pd.read_excel(roster_path)
+
+# --- Prepare roster reference list ---
+roster_names = roster_df["normalized_name"].dropna().unique().tolist()
+
+# --- Stopword list ---
+STOPWORDS = {
+    "Yankees","Dodgers","Cubs","Red Sox","Mets","Giants","Braves","Phillies",
+    "Rays","Guardians","Angels","Marlins","Padres","Orioles","Reds","Astros",
+    "White Sox","Cardinals","Athletics","Pirates","Rangers","Nationals","Blue Jays",
+    "Brewers","Tigers","Rockies","Royals","Twins","Diamondbacks","Mariners",
+    "Baseball","MLB","World","Series","Playoffs","Game","Team","Pitcher","Hitter",
+    "Batter","Outfielder","Infielder","Catcher","Roster","Draft","Season","All Star",
+    "League","Division","Championship","Manager","Coach","Lineup","Bullpen",
+    "January","February","March","April","May","June","July","August","September",
+    "October","November","December",
+    "Spring","Training","Postseason","Offseason","AL","NL","MVP"
+}
+
+# --- Regex extractor ---
+def extract_name_candidates(text):
+    if pd.isna(text):
+        return []
+    pattern = r"\b([A-Z][a-z]+(?:\s[A-Z][a-z]+){0,2})\b"
+    return re.findall(pattern, text)
+
+# --- Fuzzy match to roster ---
+def match_all_to_roster(candidates, threshold=92):
+    matched_players, confidences = [], []
+    for cand in candidates:
+        if len(cand.split()) < 2 or cand in STOPWORDS:
+            continue
+        normalized = re.sub(r"[^a-z\s]", "", cand.lower()).strip().title()
+        match, score, _ = process.extractOne(normalized, roster_names, scorer=fuzz.WRatio)
+        if score >= threshold:
+            matched_players.append(match)
+            confidences.append(round(score, 1))
+    unique = pd.Series(matched_players).unique().tolist()
+    return unique, confidences
+
+# --- Match and expand ---
+matched_rows = []
+for _, row in reddit_df.iterrows():
+    candidates = extract_name_candidates(row["text"])
+    matches, scores = match_all_to_roster(candidates)
+    n = len(matches)
+
+    if n == 0:
+        continue  # skip posts with no players
+    elif n == 1:
+        row["matched_players_auto"] = matches[0]
+        row["match_confidences"] = str(scores[0])
+        matched_rows.append(row)
+    elif n == 2:
+        for m, s in zip(matches, scores):
+            new_row = row.copy()
+            new_row["matched_players_auto"] = m
+            new_row["match_confidences"] = s
+            matched_rows.append(new_row)
+    elif 3 <= n <= 6:
+        row["matched_players_auto"] = "; ".join(matches)
+        row["match_confidences"] = "; ".join(map(str, scores))
+        matched_rows.append(row)
+    else:
+        continue  # skip large lists (7+ players)
+
+# --- Final DataFrame ---
+expanded_df = pd.DataFrame(matched_rows)
+expanded_df["matched_players_auto"] = expanded_df["matched_players_auto"].fillna("N/A")
+expanded_df["match_confidences"] = expanded_df["match_confidences"].fillna("N/A")
+
+# --- Save cleaned dataset ---
+expanded_df.to_csv(reddit_path, index=False)
+
+# --- Summary ---
+total_original = len(reddit_df)
+total_final = len(expanded_df)
+print("Matching and cleaning complete (balanced filtering).")
+print(f"Original rows: {total_original}")
+print(f"Final rows: {total_final}")
+print(f"Rows removed: {total_original - total_final}")
+print(f"Retention rate: {(total_final / total_original) * 100:.2f}%")
