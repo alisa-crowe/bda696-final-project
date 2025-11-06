@@ -1,0 +1,56 @@
+import pandas as pd
+import re
+import unidecode
+
+# --- Define shared normalization function ---
+def normalize_name(name):
+    if pd.isna(name):
+        return name
+
+    name = str(name).strip()
+
+    # Handle initials like "A.J." or "A. J." → "AJ"
+    name = re.sub(r"\b([A-Za-z])\.\s?([A-Za-z])\.", r"\1\2", name)
+    name = re.sub(
+        r"\b([A-Za-z])\s+([A-Za-z])\b(?=\s|$)",
+        lambda m: m.group(1) + m.group(2)
+        if len(m.group(0).strip()) == 3
+        else m.group(0),
+        name,
+    )
+
+    # Remove punctuation except spaces
+    name = re.sub(r"[^A-Za-z\s]", "", name)
+
+    # Collapse multiple spaces
+    name = re.sub(r"\s+", " ", name)
+
+    # Normalize accented characters (e.g., "José" → "Jose")
+    name = unidecode.unidecode(name)
+
+    # Capitalize each word
+    name = " ".join([word.capitalize() for word in name.split()])
+
+    return name
+
+
+# --- 1️ Normalize Reddit player dataset ---
+print("Normalizing reddit_player_data.csv...")
+reddit_df = pd.read_csv("../reddit_player_data.csv")
+
+# Auto-detect player column
+reddit_player_col = [
+    c for c in reddit_df.columns if "player" in c.lower() or "name" in c.lower()
+][0]
+print(f"Detected Reddit player column: {reddit_player_col}")
+
+reddit_df["normalized_player"] = reddit_df[reddit_player_col].apply(normalize_name)
+
+# Show before/after sample
+print("\nReddit sample (before/after normalization):")
+print(reddit_df[[reddit_player_col, "normalized_player"]].head(10))
+
+# Overwrite the Reddit dataset in place
+reddit_df.to_csv("../reddit_player_data.csv", index=False)
+print(" reddit_player_data.csv updated with normalized_player column.")
+

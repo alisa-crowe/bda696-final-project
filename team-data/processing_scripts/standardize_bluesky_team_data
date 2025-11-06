@@ -1,0 +1,78 @@
+import pandas as pd
+
+# --- Load dataset ---
+df = pd.read_csv("../bluesky_team_data.csv")
+
+print("Original unique team keywords:")
+print(sorted(df["matched_keyword"].dropna().unique()))
+print("\nStandardizing team names...\n")
+
+# --- Team name mapping (complete and fully organized) ---
+team_map = {
+    # American League East
+    "Yankees": "New York Yankees", "NYY": "New York Yankees", "NY Yankees": "New York Yankees",
+    "Bronx Bombers": "New York Yankees", "nyyankees": "New York Yankees", "nyyyankees": "New York Yankees",
+    "Red Sox": "Boston Red Sox", "redsox": "Boston Red Sox", "BOS": "Boston Red Sox", "BoSox": "Boston Red Sox", "Sox (Boston)": "Boston Red Sox",
+    "Rays": "Tampa Bay Rays", "Tampa Bay Rays": "Tampa Bay Rays", "TBR": "Tampa Bay Rays", "TampaBayRays": "Tampa Bay Rays",
+    "Orioles": "Baltimore Orioles", "BAL": "Baltimore Orioles", "Birdland": "Baltimore Orioles", "O's": "Baltimore Orioles",
+    "Blue Jays": "Toronto Blue Jays", "Jays": "Toronto Blue Jays", "TOR": "Toronto Blue Jays",
+
+    # American League Central
+    "Guardians": "Cleveland Guardians", "clevelandguardians": "Cleveland Guardians", "Cleveland Guardians": "Cleveland Guardians", "CLE": "Cleveland Guardians",
+    "Twins": "Minnesota Twins", "minnesotatwins": "Minnesota Twins", "Minnesota Twins": "Minnesota Twins", "MIN": "Minnesota Twins",
+    "Tigers": "Detroit Tigers", "Detroit Tigers": "Detroit Tigers", "DET": "Detroit Tigers", "motorcitykitties": "Detroit Tigers",
+    "Royals": "Kansas City Royals", "kansascityroyals": "Kansas City Royals", "Kansas City Royals": "Kansas City Royals", "KC Royals": "Kansas City Royals", "KCR": "Kansas City Royals",
+    "White Sox": "Chicago White Sox", "whitesox": "Chicago White Sox", "CHW": "Chicago White Sox", "ChiSox": "Chicago White Sox", "Sox (Chicago)": "Chicago White Sox",
+
+    # American League West
+    "Astros": "Houston Astros", "Houston Astros": "Houston Astros", "HOU": "Houston Astros", "Stros": "Houston Astros",
+    "Angels": "Los Angeles Angels", "angelsbaseball": "Los Angeles Angels", "Halos": "Los Angeles Angels", "LAA": "Los Angeles Angels", "LA Angels": "Los Angeles Angels",
+    "Athletics": "Oakland Athletics", "Oakland Athletics": "Oakland Athletics", "OaklandAthletics": "Oakland Athletics", "OAK": "Oakland Athletics", "A's": "Oakland Athletics", "Oakland A's": "Oakland Athletics",
+    "Rangers": "Texas Rangers", "Texas Rangers": "Texas Rangers", "TexasRangers": "Texas Rangers", "TEX": "Texas Rangers",
+    "Mariners": "Seattle Mariners", "SEA": "Seattle Mariners", "Ms": "Seattle Mariners", "M's": "Seattle Mariners",
+
+    # National League East
+    "Braves": "Atlanta Braves", "ATL": "Atlanta Braves", "Atlanta Braves": "Atlanta Braves",
+    "Mets": "New York Mets", "NYM": "New York Mets", "NY Mets": "New York Mets", "Amazins": "New York Mets", "NewYorkMets": "New York Mets",
+    "Phillies": "Philadelphia Phillies", "phillies": "Philadelphia Phillies", "PHI": "Philadelphia Phillies", "Phils": "Philadelphia Phillies",
+    "Nationals": "Washington Nationals", "Nats": "Washington Nationals", "WSH": "Washington Nationals", "WSN": "Washington Nationals",
+    "Marlins": "Miami Marlins", "Miami Marlins": "Miami Marlins", "MIA": "Miami Marlins", "letsgofish": "Miami Marlins", "Fish": "Miami Marlins",
+
+    # National League Central
+    "Cardinals": "St. Louis Cardinals", "cardinals": "St. Louis Cardinals", "Cards": "St. Louis Cardinals", "STL": "St. Louis Cardinals", "Redbirds": "St. Louis Cardinals",
+    "Cubs": "Chicago Cubs", "CHC": "Chicago Cubs", "Chicago Cubs": "Chicago Cubs", "Cubbies": "Chicago Cubs", "chicubs": "Chicago Cubs",
+    "Reds": "Cincinnati Reds", "reds": "Cincinnati Reds", "Cincinnati Reds": "Cincinnati Reds", "Redlegs": "Cincinnati Reds", "CIN": "Cincinnati Reds",
+    "Pirates": "Pittsburgh Pirates", "PIT": "Pittsburgh Pirates", "Bucs": "Pittsburgh Pirates", "buccos": "Pittsburgh Pirates",
+    "Brewers": "Milwaukee Brewers", "MIL": "Milwaukee Brewers", "Crew": "Milwaukee Brewers", "Brew Crew": "Milwaukee Brewers",
+
+    # National League West
+    "Dodgers": "Los Angeles Dodgers", "LAD": "Los Angeles Dodgers", "LA Dodgers": "Los Angeles Dodgers", "Blue Crew": "Los Angeles Dodgers",
+    "Giants": "San Francisco Giants", "SFG": "San Francisco Giants", "SF Giants": "San Francisco Giants", "SFGiants": "San Francisco Giants",
+    "Padres": "San Diego Padres", "SDP": "San Diego Padres", "Friars": "San Diego Padres",
+    "Rockies": "Colorado Rockies", "Colorado Rockies": "Colorado Rockies", "ColoradoRockies": "Colorado Rockies", "COL": "Colorado Rockies", "Rox": "Colorado Rockies",
+    "Diamondbacks": "Arizona Diamondbacks", "D-backs": "Arizona Diamondbacks", "Dbacks": "Arizona Diamondbacks", "azdiamondbacks": "Arizona Diamondbacks", "ARI": "Arizona Diamondbacks", "Snakes": "Arizona Diamondbacks",
+}
+
+# --- Apply mapping ---
+df["matched_keyword"] = df["matched_keyword"].replace(team_map)
+
+# --- Identify unmatched values ---
+all_team_names = set(team_map.values())
+unmatched_rows = df[~df["matched_keyword"].isin(all_team_names)]
+
+print(" Standardization complete! Unique values after cleaning:\n")
+print(sorted(df["matched_keyword"].dropna().unique()))
+
+print(f"\n Found {len(unmatched_rows)} rows with unrecognized or non-team keywords.")
+if len(unmatched_rows) > 0:
+    print("\nExamples of unmatched keywords:")
+    print(unmatched_rows["matched_keyword"].dropna().unique()[:25])
+
+# --- Overwrite original dataset ---
+df.to_csv("../bluesky_team_data.csv", index=False)
+print("\nCleaned data written back to ../bluesky_team_data.csv")
+
+# --- Save unmatched for manual review ---
+if len(unmatched_rows) > 0:
+    unmatched_rows.to_csv("../bluesky_team_data_unmatched.csv", index=False)
+    print("Unmatched rows saved to ../bluesky_team_data_unmatched.csv for manual review.")

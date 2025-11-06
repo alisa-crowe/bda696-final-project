@@ -1,0 +1,66 @@
+import pandas as pd
+
+# --- Load dataset ---
+# The CSV is located one level up from this script
+df = pd.read_csv("../reddit_team_data.csv")
+
+print("Original unique team keywords:")
+print(sorted(df["matched_keyword"].unique()))
+print("\nStandardizing team names...\n")
+
+# --- Team name mapping ---
+team_map = {
+    # American League East
+    "Yankees": "New York Yankees", "NYY": "New York Yankees",
+    "Red Sox": "Boston Red Sox", "BOS": "Boston Red Sox",
+    "Rays": "Tampa Bay Rays",
+    "Orioles": "Baltimore Orioles", "BAL": "Baltimore Orioles", "Birdland": "Baltimore Orioles", "O's": "Baltimore Orioles",
+    "Blue Jays": "Toronto Blue Jays", "Jays": "Toronto Blue Jays",
+
+    # American League Central
+    "Guardians": "Cleveland Guardians", "Cleveland Guardians": "Cleveland Guardians", "CLE": "Cleveland Guardians",
+    "Twins": "Minnesota Twins", "MIN": "Minnesota Twins",
+    "Tigers": "Detroit Tigers", "Detroit Tigers": "Detroit Tigers", "DET": "Detroit Tigers",
+    "Royals": "Kansas City Royals",
+    "White Sox": "Chicago White Sox",
+
+    # American League West
+    "Astros": "Houston Astros", "HOU": "Houston Astros", "Stros": "Houston Astros",
+    "Angels": "Los Angeles Angels", "Halos": "Los Angeles Angels",
+    "Athletics": "Oakland Athletics", "OAK": "Oakland Athletics", "A's": "Oakland Athletics",
+    "Rangers": "Texas Rangers", "TEX": "Texas Rangers",
+    "Mariners": "Seattle Mariners", "SEA": "Seattle Mariners", "Ms": "Seattle Mariners",
+
+    # National League East
+    "Braves": "Atlanta Braves", "ATL": "Atlanta Braves",
+    "Mets": "New York Mets", "NYM": "New York Mets",
+    "Phillies": "Philadelphia Phillies", "PHI": "Philadelphia Phillies", "Phils": "Philadelphia Phillies",
+    "Nationals": "Washington Nationals", "Nats": "Washington Nationals",
+    "Marlins": "Miami Marlins", "Fish": "Miami Marlins",
+
+    # National League Central
+    "Cardinals": "St. Louis Cardinals", "Cards": "St. Louis Cardinals", "STL": "St. Louis Cardinals",
+    "Cubs": "Chicago Cubs", "Cubbies": "Chicago Cubs", "Chicago Cubs": "Chicago Cubs", "CHC": "Chicago Cubs",
+    "Reds": "Cincinnati Reds", "Cincinnati Reds": "Cincinnati Reds", "Redlegs": "Cincinnati Reds", "CIN": "Cincinnati Reds",
+    "Pirates": "Pittsburgh Pirates", "PIT": "Pittsburgh Pirates",
+    "Brewers": "Milwaukee Brewers", "MIL": "Milwaukee Brewers", "Crew": "Milwaukee Brewers",
+
+    # National League West
+    "Dodgers": "Los Angeles Dodgers", "LAD": "Los Angeles Dodgers",
+    "Giants": "San Francisco Giants", "SF Giants": "San Francisco Giants",
+    "Padres": "San Diego Padres", "Friars": "San Diego Padres",
+    "Rockies": "Colorado Rockies", "Rox": "Colorado Rockies",
+    "Diamondbacks": "Arizona Diamondbacks", "D-backs": "Arizona Diamondbacks", "Snakes": "Arizona Diamondbacks", "ARI": "Arizona Diamondbacks",
+}
+
+# --- Apply mapping ---
+df["matched_keyword"] = df["matched_keyword"].replace(team_map)
+
+# --- Verify changes ---
+print("Standardization complete! Unique team names after cleaning:")
+print(sorted(df["matched_keyword"].unique()))
+
+# Overwrite the original dataset
+df.to_csv("../reddit_team_data.csv", index=False)
+print("Cleaned data written back to reddit_team_data.csv")
+

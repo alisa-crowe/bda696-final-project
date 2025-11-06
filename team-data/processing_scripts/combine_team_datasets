@@ -1,0 +1,22 @@
+import pandas as pd
+
+# --- Load both cleaned datasets ---
+blue = pd.read_csv("../bluesky_team_data.csv")
+reddit = pd.read_csv("../reddit_team_data.csv")
+
+print(f"Loaded Bluesky: {blue.shape[0]} rows")
+print(f"Loaded Reddit: {reddit.shape[0]} rows")
+
+# --- Align column order ---
+common_cols = [col for col in blue.columns if col in reddit.columns]
+blue = blue[common_cols]
+reddit = reddit[common_cols]
+
+# --- Combine vertically (stack) ---
+combined = pd.concat([blue, reddit], ignore_index=True)
+
+print(f"Combined dataset shape: {combined.shape}")
+
+# --- Save merged dataset ---
+combined.to_csv("../combined_team_data.csv", index=False)
+print(" Saved combined dataset to ../combined_team_data.csv")
