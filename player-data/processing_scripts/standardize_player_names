@@ -2,14 +2,15 @@ import pandas as pd
 import re
 import unidecode
 
-# --- Define shared normalization function ---
+# --- Define normalization function ---
 def normalize_name(name):
+    """Cleans and standardizes player names for consistent matching."""
     if pd.isna(name):
         return name
 
     name = str(name).strip()
 
-    # Handle initials like "A.J." or "A. J." → "AJ"
+    # Handle initials like "A.J." or "A. J." -> "AJ"
     name = re.sub(r"\b([A-Za-z])\.\s?([A-Za-z])\.", r"\1\2", name)
     name = re.sub(
         r"\b([A-Za-z])\s+([A-Za-z])\b(?=\s|$)",
@@ -25,32 +26,31 @@ def normalize_name(name):
     # Collapse multiple spaces
     name = re.sub(r"\s+", " ", name)
 
-    # Normalize accented characters (e.g., "José" → "Jose")
+    # Normalize accented characters (e.g., "José" -> "Jose")
     name = unidecode.unidecode(name)
 
     # Capitalize each word
-    name = " ".join([word.capitalize() for word in name.split()])
+    name = " ".join(word.capitalize() for word in name.split())
 
     return name
 
 
-# --- 1️ Normalize Reddit player dataset ---
-print("Normalizing reddit_player_data.csv...")
-reddit_df = pd.read_csv("../reddit_player_data.csv")
+# --- Load roster dataset ---
+roster_path = "../team_rosters_cleaned.xlsx"
+print(f"Loading {roster_path} ...")
+roster_df = pd.read_excel(roster_path)
 
-# Auto-detect player column
-reddit_player_col = [
-    c for c in reddit_df.columns if "player" in c.lower() or "name" in c.lower()
-][0]
-print(f"Detected Reddit player column: {reddit_player_col}")
+# Ensure player_name column exists
+if "player_name" not in roster_df.columns:
+    raise ValueError("The roster file must have a 'player_name' column.")
 
-reddit_df["normalized_player"] = reddit_df[reddit_player_col].apply(normalize_name)
+# --- Create normalized_name column ---
+roster_df["normalized_name"] = roster_df["player_name"].apply(normalize_name)
 
-# Show before/after sample
-print("\nReddit sample (before/after normalization):")
-print(reddit_df[[reddit_player_col, "normalized_player"]].head(10))
+# --- Preview sample ---
+print("\nSample before/after normalization:")
+print(roster_df[["player_name", "normalized_name"]].head(10))
 
-# Overwrite the Reddit dataset in place
-reddit_df.to_csv("../reddit_player_data.csv", index=False)
-print(" reddit_player_data.csv updated with normalized_player column.")
-
+# --- Save updated file ---
+roster_df.to_excel(roster_path, index=False)
+print(f"\n Updated {roster_path} with 'normalized_name' column.")
