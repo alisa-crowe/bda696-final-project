@@ -1,0 +1,234 @@
+import pandas as pd
+import re
+from tqdm import tqdm
+from langdetect import detect, DetectorFactory
+
+# consistent language detection
+DetectorFactory.seed = 0
+tqdm.pandas()
+
+# --- Load data ---
+df = pd.read_csv("../combined_team_data.csv")
+original_count = len(df)
+print(f"Loaded {original_count} rows.")
+
+# --- Drop duplicates ---
+df = df.drop_duplicates()
+
+# === FILTER DEFINITIONS ===
+
+def is_nonsense(text):
+    if not isinstance(text, str) or len(text.strip()) == 0:
+        return True
+    cleaned = re.sub(r'[^A-Za-z0-9\s]', '', text)
+    words = cleaned.split()
+    return len(words) < 3 or all(len(w) <= 2 for w in words)
+
+def too_few_letters(text):
+    letters = re.findall(r'[A-Za-z]', text)
+    return len(letters) / max(len(text), 1) < 0.3
+
+def link_or_mention_heavy(text):
+    tokens = text.split()
+    if len(tokens) == 0:
+        return True
+    url_like = sum(1 for t in tokens if "http" in t or "@" in t or "#" in t)
+    return url_like / len(tokens) > 0.3
+
+def looks_like_gibberish(text):
+    return bool(re.search(r'(.)\\1{4,}', text)) or bool(re.search(r'^[a-z]{10,}$', text, re.I))
+
+def not_english(text):
+    try:
+        return detect(text) != "en"
+    except:
+        return True
+
+def has_too_many_nonascii(text):
+    non_ascii = sum(1 for c in str(text) if ord(c) > 127)
+    return non_ascii / max(len(str(text)), 1) > 0.2
+
+def is_promotional(text):
+    if not isinstance(text, str):
+        return False
+    promo_patterns = [
+        r"^(\W|\s)*new\s+episode",
+        r"^(\W|\s)*new\s+article",
+        r"^(\W|\s)*new\s+podcast",
+        r"^(\W|\s)*check\s+out\s+our\s+latest",
+        r"^(\W|\s)*listen\s+now",
+    ]
+    for pat in promo_patterns:
+        if re.search(pat, text, re.IGNORECASE):
+            return True
+    return False
+
+
+#  === PASTE  EXPANDED BASEBALL TERMS LIST RIGHT BELOW THIS COMMENT  ===
+baseball_terms = [
+    # Core baseball concepts
+    "mlb", "baseball", "fantasybaseball", "fantasy baseball", "fantasy", "roto",
+    "pitch", "pitcher", "pitching", "hitter", "bat", "batter", "hitting", "catcher",
+    "fielder", "infielder", "outfielder", "shortstop", "second base", "third base",
+    "first base", "reliever", "starter", "closer", "bullpen", "dugout", "mound",
+    "plate", "umpire", "lineup", "roster", "rotation", "triple-a", "minor league",
+    "call-up", "prospect", "farm system",
+
+    # Gameplay terms
+    "run", "runs", "rbi", "hit", "hits", "home run", "homer", "hr", "walk", "walks",
+    "strike", "strikes", "strikeout", "strikeouts", "k/9", "era", "whip", "ops",
+    "on-base", "slugging", "avg", "batting average", "obp", "slg", "iso", "war",
+    "fip", "xfip", "babip", "innings", "inning", "ip", "era+", "obp", "runners",
+    "stolen base", "sb", "cs", "caught stealing", "double play", "dp", "fielding",
+    "defense", "offense", "swing", "miss", "fastball", "slider", "curveball",
+    "changeup", "splitter", "velocity", "spin rate", "launch angle", "exit velo",
+
+    # Fantasy baseball / analytics
+    "waiver", "streamer", "add/drop", "draft", "keeper", "mock draft", "adp",
+    "lineup lock", "dfs", "daily fantasy", "fanduel", "draftkings", "espn fantasy",
+    "yahoo fantasy", "roster move", "injury list", "il stint", "dl stint", "call up",
+    "stash", "must add", "sleeper", "breakout", "bust", "two-start", "fab bid",
+    "free agent", "trade deadline", "waiver wire", "projection", "rankings",
+
+    # General baseball talk
+    "game", "games", "season", "postseason", "playoffs", "wild card", "division",
+    "series", "world series", "championship", "all-star", "spring training",
+    "opening day", "first pitch", "win", "loss", "winning", "losing", "comeback",
+    "shutout", "save", "no-hitter", "perfect game", "triple", "double", "single",
+    "grand slam", "walk-off", "run differential", "stats", "box score", "statcast",
+
+    # Slang / casual baseball talk
+    "dinger", "bomb", "tank", "yard", "blast", "laser", "heat", "gas", "filthy",
+    "whiff", "paint", "velo", "heat map", "sinker", "nasty pitch", "ace", "stud",
+    "slugger", "glove", "clutch", "inning eater", "bat flip", "hacks", "grind",
+    "walk rate", "hard hit", "barrel", "hard contact", "swings", "plate discipline",
+
+    # Popular teams (all MLB)
+    "yankees", "red sox", "orioles", "blue jays", "rays",
+    "white sox", "guardians", "tigers", "royals", "twins",
+    "astros", "rangers", "mariners", "athletics", "angels",
+    "braves", "mets", "phillies", "marlins", "nationals",
+    "cardinals", "brewers", "cubs", "pirates", "reds",
+    "dodgers", "giants", "padres", "rockies", "diamondbacks",
+
+    # Other related proper nouns
+    "mlb network", "statcast", "espn", "fantrax", "fangraphs", "baseball reference",
+    "rotowire", "savant", "baseball savant", "mlb the show", "top prospect",
+    "homerun derby", "hall of fame", "gold glove", "silver slugger"
+]
+def is_about_baseball(text):
+    if not isinstance(text, str):
+        return False
+    lower = text.lower()
+    return any(term in lower for term in baseball_terms)
+
+
+# === EXTRA QUALITY FILTERS ===
+
+def too_short(text):
+    return len(str(text).split()) < 5   # adjust to 8 for stricter filtering
+
+def low_information(text):
+    words = str(text).split()
+    unique_ratio = len(set(words)) / max(len(words), 1)
+    return unique_ratio < 0.4
+
+def too_many_hashtags_or_caps(text):
+    tokens = str(text).split()
+    if len(tokens) == 0:
+        return True
+    hashtags = sum(1 for t in tokens if t.startswith("#"))
+    hashtag_ratio = hashtags / len(tokens)
+    caps_ratio = sum(1 for c in text if c.isupper()) / max(len(text), 1)
+    return hashtag_ratio > 0.3 or caps_ratio > 0.7
+
+def looks_like_scoreboard(text):
+    txt = str(text).lower()
+    return bool(re.search(r'\b\d+\s*[-–]\s*\d+\b', txt)) and "final" in txt
+
+def looks_human(text):
+    txt = str(text)
+    url_count = txt.lower().count("http")
+    emoji_count = len(re.findall(r"[^\w\s,.!?]", txt))
+    return (url_count == 0) and (emoji_count / max(len(txt), 1) < 0.2)
+
+
+# === APPLY FILTERS ===
+
+print("Filtering nonsense text...")
+df = df[~df["text"].progress_apply(is_nonsense)]
+
+print("Filtering posts with too few letters...")
+df = df[~df["text"].progress_apply(too_few_letters)]
+
+print("Filtering by length (20–500 chars)...")
+df = df[df["text"].str.len().between(20, 500)]
+
+print("Filtering link/mention-heavy posts...")
+df = df[~df["text"].progress_apply(link_or_mention_heavy)]
+
+print("Filtering gibberish text...")
+df = df[~df["text"].progress_apply(looks_like_gibberish)]
+
+print("Filtering non-ASCII heavy posts...")
+df = df[~df["text"].progress_apply(has_too_many_nonascii)]
+
+print("Detecting non-English posts (this one takes a while)...")
+df = df[~df["text"].progress_apply(not_english)]
+
+print("Filtering rows with missing matched_keyword values...")
+df = df.dropna(subset=["matched_keyword"])
+
+print("Filtering promotional / automated posts...")
+df = df[~df["text"].progress_apply(is_promotional)]
+
+print("Filtering non-baseball content...")
+before_baseball = len(df)
+df = df[df["text"].progress_apply(is_about_baseball)]
+after_baseball = len(df)
+print(f"Removed {before_baseball - after_baseball} non-baseball rows.")
+
+print("Filtering too-short posts...")
+df = df[~df["text"].progress_apply(too_short)]
+
+print("Filtering low-information posts...")
+df = df[~df["text"].progress_apply(low_information)]
+
+print("Filtering hashtag/caps-heavy posts...")
+df = df[~df["text"].progress_apply(too_many_hashtags_or_caps)]
+
+print("Filtering scoreboard-style posts...")
+df = df[~df["text"].progress_apply(looks_like_scoreboard)]
+
+print("Filtering non-human-like posts...")
+df = df[df["text"].progress_apply(looks_human)]
+
+print("Filtering bot-style or automated posts...")
+def has_bot_signature(text):
+    patterns = [
+        r"posted by", r"via ", r"bot$", r"auto[- ]post",
+        r"scheduled tweet", r"rss feed", r"bufferapp", r"hootsuite"
+    ]
+    txt = str(text).lower()
+    return any(re.search(p, txt) for p in patterns)
+
+df = df[~df["text"].progress_apply(has_bot_signature)]
+
+print("Filtering low alphabetic density posts...")
+df = df[df["text"].apply(lambda x: sum(c.isalpha() for c in str(x)) / max(len(str(x)),1) > 0.5)]
+
+print("Filtering excessive emoji/punctuation repetition...")
+def excessive_emojis_or_punct(text):
+    return bool(re.search(r'([!?😂🔥⭐️])\1{2,}', str(text)))
+df = df[~df["text"].progress_apply(excessive_emojis_or_punct)]
+
+# === SUMMARY ===
+final_count = len(df)
+deleted_count = original_count - final_count
+df.to_csv("../combined_team_data_cleaned.csv", index=False)
+
+print("\n=== CLEANING COMPLETE ===")
+print(f"Original rows: {original_count}")
+print(f"Deleted rows: {deleted_count}")
+print(f"Remaining rows: {final_count}")
+print("Cleaned dataset saved as '../combined_team_data_cleaned.csv'")
