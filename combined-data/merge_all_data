@@ -1,0 +1,52 @@
+import pandas as pd
+
+# --- File paths ---
+player_path = "../player-data/reddit_player_data_with_player_stats.csv"
+team_path = "../team-data/combined_team_data.csv"
+output_path = "combined_team_and_player_data.csv"
+
+print("Loading datasets...")
+players = pd.read_csv(player_path)
+teams = pd.read_csv(team_path)
+
+print(f"Player dataset rows: {len(players):,}")
+print(f"Team dataset rows: {len(teams):,}")
+
+# --- Ensure 'year' column exists and populate missing with 2025 ---
+if "year" not in players.columns:
+    players["year"] = 2025
+else:
+    players["year"] = players["year"].fillna(2025)
+
+if "year" not in teams.columns:
+    teams["year"] = 2025
+else:
+    teams["year"] = teams["year"].fillna(2025)
+
+# --- Identify player_ columns for filling later ---
+player_cols = [c for c in players.columns if c.startswith("player_")]
+
+# --- Merge on permalink ---
+print("\nMerging on 'permalink'...")
+merged = pd.merge(teams, players, on="permalink", how="outer", suffixes=("_teamrec", "_playerrec"))
+
+# --- Fill missing player-level columns with 'N/A' ---
+for col in player_cols:
+    if col not in merged.columns:
+        # if the column doesn’t exist yet (outer merge edge case)
+        merged[col] = "N/A"
+    else:
+        merged[col] = merged[col].fillna("N/A")
+
+# --- Final cleanup ---
+if "year" not in merged.columns:
+    merged["year"] = 2025
+else:
+    merged["year"] = merged["year"].fillna(2025)
+
+print("\nMerged dataset shape:", merged.shape)
+print("Sample columns:", merged.columns[:10].tolist())
+
+# --- Save ---
+merged.to_csv(output_path, index=False)
+print(f"\n Combined dataset saved to {output_path}")
