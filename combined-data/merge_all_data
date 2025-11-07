@@ -2,7 +2,7 @@ import pandas as pd
 
 # --- File paths ---
 player_path = "../player-data/reddit_player_data_with_player_stats.csv"
-team_path = "../team-data/combined_team_data.csv"
+team_path = "../team-data/combined_team_data_cleaned.csv"
 output_path = "combined_team_and_player_data.csv"
 
 print("Loading datasets...")
