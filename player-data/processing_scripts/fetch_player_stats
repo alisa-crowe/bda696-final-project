@@ -1,0 +1,62 @@
+from pybaseball import batting_stats
+import pandas as pd
+import re
+
+# --- Fetch MLB batting stats ---
+# If 2025 data isn't available yet, use the latest season (e.g., 2024)
+print("Fetching player batting stats...")
+stats = batting_stats(2025)
+
+# --- Keep relevant columns ---
+keep_cols = [
+    "Name", "Team", "G", "PA", "AB", "R", "H", "2B", "3B", "HR", "RBI",
+    "BB", "SO", "SB", "CS", "AVG", "OBP", "SLG", "OPS", "WAR"
+]
+stats = stats[keep_cols]
+
+# --- Rename to descriptive, consistent names ---
+stats.columns = [
+    "player_name",
+    "player_team",
+    "player_games_played",
+    "player_plate_appearances",
+    "player_at_bats",
+    "player_runs_scored",
+    "player_hits",
+    "player_doubles",
+    "player_triples",
+    "player_home_runs",
+    "player_runs_batted_in",
+    "player_walks",
+    "player_strikeouts",
+    "player_stolen_bases",
+    "player_caught_stealing",
+    "player_batting_avg",
+    "player_on_base_pct",
+    "player_slugging_pct",
+    "player_on_base_plus_slugging",
+    "player_war"
+]
+
+# --- Normalize player names ---
+def normalize_name(name):
+    name = str(name).lower()
+    name = re.sub(r"[.'’-]", "", name)
+    name = re.sub(r"[^a-z\s]", "", name)
+    name = re.sub(r"\s+", " ", name).strip()
+    return name.title()
+
+stats["player_name_norm"] = stats["player_name"].apply(normalize_name)
+
+# --- Derived stats (add extra insight) ---
+stats["player_isolated_power"] = stats["player_slugging_pct"] - stats["player_batting_avg"]
+stats["player_k_to_bb_ratio"] = (
+    stats["player_strikeouts"] / stats["player_walks"].replace(0, pd.NA)
+)
+
+# --- Save expanded dataset ---
+stats.to_csv("../player_stats_2025.csv", index=False)
+
+print(" Saved expanded, descriptive player stats to ../player_stats_2025.csv")
+print("\nSample preview:")
+print(stats.head(10))
