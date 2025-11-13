@@ -1,4 +1,4 @@
-#this script was ran in a Pytorch notebook on JupyterHub in order to utilize a GPU
+#this script was ran in a Pytorch notebook on JupyterHub
 
 import pandas as pd
 from transformers import pipeline
