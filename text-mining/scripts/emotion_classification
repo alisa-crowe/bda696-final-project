@@ -1,0 +1,73 @@
+#this script was ran in a Pytorch notebook on JupyterHub in order to utilize a GPU
+
+import pandas as pd
+from transformers import pipeline
+from tqdm.notebook import tqdm
+import os
+
+# ----------------------------------------------------
+# 1. Load dataset
+# ----------------------------------------------------
+input_file = "team_data_with_sentiment.csv"  # adjust if needed
+print(f"Loading dataset from {input_file}...")
+df = pd.read_csv(input_file)
+
+if "text" not in df.columns:
+    raise ValueError("The input CSV must contain a 'text' column.")
+
+print(f"Loaded {len(df):,} rows.")
+
+# ----------------------------------------------------
+# 2. Load emotion classification model (GPU)
+# ----------------------------------------------------
+print("Loading emotion model on GPU...")
+emotion_pipeline = pipeline(
+    "text-classification",
+    model="j-hartmann/emotion-english-distilroberta-base",
+    device=0,   # use the first GPU       # automatically use available GPU(s)
+    return_all_scores=False
+)
+
+# ----------------------------------------------------
+# 3. Define batch processing
+# ----------------------------------------------------
+batch_size = 10000   # adjust if you have more GPU memory
+output_dir = "../team-data/emotion_output_batches"
+os.makedirs(output_dir, exist_ok=True)
+
+def classify_emotions_in_batches(df, batch_size):
+    tqdm.pandas()
+    num_batches = (len(df) // batch_size) + 1
+    for i in range(num_batches):
+        start = i * batch_size
+        end = min((i + 1) * batch_size, len(df))
+        chunk = df.iloc[start:end].copy()
+        if chunk.empty:
+            continue
+
+        print(f"\nProcessing rows {start} to {end}...")
+        chunk["emotion_label"] = chunk["text"].astype(str).progress_apply(
+            lambda x: emotion_pipeline(x[:512])[0]["label"]
+        )
+
+        chunk_file = os.path.join(output_dir, f"emotion_output_part_{i+1}.csv")
+        chunk.to_csv(chunk_file, index=False)
+        print(f"Saved {chunk_file}")
+
+# ----------------------------------------------------
+# 4. Run the classification
+# ----------------------------------------------------
+classify_emotions_in_batches(df, batch_size=batch_size)
+
+# ----------------------------------------------------
+# 5. Combine partial outputs
+# ----------------------------------------------------
+print("\nCombining all batch outputs into final file...")
+batch_files = [os.path.join(output_dir, f) for f in os.listdir(output_dir) if f.endswith(".csv")]
+batch_files.sort()
+
+combined_df = pd.concat([pd.read_csv(f) for f in batch_files], ignore_index=True)
+output_file = "team_data_with_emotions.csv"
+combined_df.to_csv(output_file, index=False)
+
+print(f"\nEmotion classification complete. Final file saved to: {output_file}")
