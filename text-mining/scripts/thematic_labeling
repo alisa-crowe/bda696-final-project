@@ -1,0 +1,117 @@
+#this script was ran in a Pytorch notebook on JupyterHub
+
+# ----------------------------------------------------
+# 1. Imports
+# ----------------------------------------------------
+import pandas as pd
+from transformers import pipeline
+import torch
+from tqdm import tqdm
+from math import ceil
+import os
+
+# ----------------------------------------------------
+# 2. Setup
+# ----------------------------------------------------
+input_file = "team_data_with_emotions.csv"
+checkpoint_file = "team_data_with_themes_partial.csv"
+output_file = "team_data_with_themes_final.csv"
+
+print(f"Loading base dataset from {input_file}...")
+df = pd.read_csv(input_file)
+
+if "text" not in df.columns:
+    raise ValueError("Dataset must contain a 'text' column.")
+print(f"Loaded {len(df):,} rows.")
+
+# ----------------------------------------------------
+# 3. Load checkpoint if it exists
+# ----------------------------------------------------
+if os.path.exists(checkpoint_file):
+    print(f"\nFound existing checkpoint: {checkpoint_file}")
+    done_df = pd.read_csv(checkpoint_file)
+    processed_indices = set(done_df.index)
+    print(f"Resuming from checkpoint — {len(done_df)} rows already labeled.")
+else:
+    done_df = pd.DataFrame(columns=list(df.columns) + ["theme_label"])
+    processed_indices = set()
+    print("\nNo checkpoint found. Starting fresh.")
+
+# ----------------------------------------------------
+# 4. Thematic labels
+# ----------------------------------------------------
+labels = [
+    "team performance",
+    "player performance",
+    "management decisions",
+    "fan experience",
+    "baseball culture & nostalgia",
+    "humor & memes",
+    "off-topic or cross-sport",
+    "media & analysis",
+    "league policies & fairness",
+    "offseason & future outlook"
+]
+
+print("\nUsing thematic labels:")
+for l in labels:
+    print(f" - {l}")
+
+# ----------------------------------------------------
+# 5. Model setup (GPU-aware)
+# ----------------------------------------------------
+device = 0 if torch.cuda.is_available() else -1
+print(f"\nUsing device: {'GPU' if device == 0 else 'CPU'}")
+
+classifier = pipeline(
+    "zero-shot-classification",
+    model="facebook/bart-large-mnli",
+    device=device
+)
+
+# ----------------------------------------------------
+# 6. Run batched inference with checkpointing
+# ----------------------------------------------------
+batch_size = 32
+save_every = 500  # save checkpoint every 2k rows processed
+remaining_indices = [i for i in df.index if i not in processed_indices]
+num_batches = ceil(len(remaining_indices) / batch_size)
+
+print(f"\nProcessing {len(remaining_indices):,} remaining rows in {num_batches} batches of {batch_size}...")
+
+new_rows = []
+
+for b in tqdm(range(num_batches), desc="Zero-shot labeling"):
+    start = b * batch_size
+    end = min((b + 1) * batch_size, len(remaining_indices))
+    idxs = remaining_indices[start:end]
+    batch_texts = df.loc[idxs, "text"].astype(str).tolist()
+
+    try:
+        results = classifier(batch_texts, candidate_labels=labels, batch_size=batch_size)
+        preds = [r["labels"][0] if "labels" in r else "error" for r in results]
+    except Exception as e:
+        print(f"Batch {b} failed: {e}")
+        preds = ["error"] * len(batch_texts)
+
+    batch_df = df.loc[idxs].copy()
+    batch_df["theme_label"] = preds
+    new_rows.append(batch_df)
+
+    # Periodically save progress
+    if (b + 1) * batch_size % save_every == 0 or (b + 1) == num_batches:
+        done_df = pd.concat([done_df, pd.concat(new_rows)], ignore_index=False)
+        done_df.to_csv(checkpoint_file, index=False)
+        new_rows = []
+        print(f"\nCheckpoint saved: {checkpoint_file} ({len(done_df)} total labeled rows)")
+
+# ----------------------------------------------------
+# 7. Final save
+# ----------------------------------------------------
+done_df = pd.concat([done_df, pd.concat(new_rows)], ignore_index=False)
+done_df.to_csv(output_file, index=False)
+print(f"\nThematic labeling complete. Final results saved to: {output_file}")
+
+# Optional summary
+print("\nTheme distribution (% of total):")
+print(done_df["theme_label"].value_counts(normalize=True).round(3) * 100)

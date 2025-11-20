@@ -1,0 +1,55 @@
+import pandas as pd
+from nltk.sentiment import SentimentIntensityAnalyzer
+import nltk
+
+# ----------------------------------------------------
+# 1. Setup
+# ----------------------------------------------------
+print("Downloading VADER lexicon (only needed once)...")
+nltk.download('vader_lexicon')
+
+# Load dataset
+print("Loading dataset...")
+input_file = "../team-data/combined_team_data_cleaned.csv"
+df = pd.read_csv(input_file)
+
+# Ensure text column exists
+if "text" not in df.columns:
+    raise ValueError("The input CSV must contain a 'text' column.")
+
+print(f"Loaded {len(df):,} rows.")
+
+# ----------------------------------------------------
+# 2. Sentiment analysis
+# ----------------------------------------------------
+print("Running sentiment analysis...")
+
+sia = SentimentIntensityAnalyzer()
+
+# Apply VADER compound score to each text entry
+df["sentiment_score"] = df["text"].astype(str).apply(lambda x: sia.polarity_scores(x)["compound"])
+
+# Label classification: positive / neutral / negative
+def label_sentiment(score):
+    if score > 0.05:
+        return "positive"
+    elif score < -0.05:
+        return "negative"
+    else:
+        return "neutral"
+
+df["sentiment_label"] = df["sentiment_score"].apply(label_sentiment)
+
+# ----------------------------------------------------
+# 3. Summary
+# ----------------------------------------------------
+summary = df["sentiment_label"].value_counts(normalize=True).round(3) * 100
+print("\nSentiment distribution (% of total):")
+print(summary.to_string())
+
+# ----------------------------------------------------
+# 4. Export
+# ----------------------------------------------------
+output_file = "team_data_with_sentiment.csv"
+df.to_csv(output_file, index=False)
+print(f"\n Sentiment classification complete. Results saved to: {output_file}")
