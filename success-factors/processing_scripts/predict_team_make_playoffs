@@ -1,0 +1,87 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score, classification_report
+
+
+def main():
+    df = pd.read_csv("team_data_with_themes_final.csv")
+    df["team"] = df["matched_keyword"]
+
+    # Convert Yes/No to numeric 1/0
+    df["team_make_playoffs"] = df["team_make_playoffs"].astype(str).str.strip().str.lower()
+    df["team_make_playoffs"] = df["team_make_playoffs"].map({
+        "yes": 1,
+        "no": 0,
+        "1": 1,
+        "0": 0
+    })
+
+    # Only baseball performance stats (no sentiment/emotion/theme variables)
+    team_stat_cols = [
+        "team_AVG", "team_BB_per_9", "team_E", "team_ERA", "team_FldPct",
+        "team_HR", "team_K_per_9", "team_OBP", "team_OPS", "team_SLG",
+        "team_TeamPayroll", "team_WHIP", "team_run_diff",
+        "team_runs_allowed", "team_runs_scored"
+    ]
+
+    agg_cols = team_stat_cols + ["team_make_playoffs"]
+
+    # Aggregate to team-year level
+    team_year_df = (
+        df.groupby(["team", "year"])[agg_cols]
+        .mean()
+        .reset_index()
+    )
+
+    target = "team_make_playoffs"
+    feature_cols = team_stat_cols
+
+    # Drop any rows with missing values
+    data = team_year_df.dropna(subset=feature_cols + [target])
+    X = data[feature_cols].values
+    y = data[target].values
+
+    # Standardize
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X_scaled, y, test_size=0.2, random_state=42, stratify=y
+    )
+
+    # Logistic Regression Model
+    model = LogisticRegression(max_iter=2000)
+    model.fit(X_train, y_train)
+
+    y_proba = model.predict_proba(X_test)[:, 1]
+    y_pred = model.predict(X_test)
+
+    print("=== Classification Results: Predicting team_make_playoffs ===")
+    print("ROC AUC:", roc_auc_score(y_test, y_proba))
+    print("\nClassification Report:")
+    print(classification_report(y_test, y_pred))
+
+    # Feature importance (log-odds coefficients)
+    coef_series = pd.Series(model.coef_[0], index=feature_cols)
+    coef_series = coef_series.sort_values(key=lambda x: x.abs(), ascending=False)
+
+    print("\nTop Feature Importances:")
+    print(coef_series)
+
+    # Visualization
+    plt.figure(figsize=(8, 10))
+    coef_series.head(20).plot(kind="barh")
+    plt.gca().invert_yaxis()
+    plt.title("Feature Importance: Predicting team_make_playoffs")
+    plt.xlabel("Standardized Log-Odds Coefficient")
+    plt.tight_layout()
+    plt.savefig("feature_importance_make_playoffs.png", dpi=300)
+
+
+if __name__ == "__main__":
+    main()
