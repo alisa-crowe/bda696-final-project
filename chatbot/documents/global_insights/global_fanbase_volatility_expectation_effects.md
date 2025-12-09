@@ -27,3 +27,5 @@ These patterns suggest that **location, culture, history, and expectations** str
 
 **Core takeaway:**  
 When discussing fanbases, the model should recognize that some are **overly optimistic or pessimistic relative to team performance**, and that volatility itself is an informative trait.
+
+We analyzed fan discourse using sentiment scores, discrete emotion labels, and thematic categories for social media posts. Overall, **sentiment tracks performance directionally**, but **emotion and theme information provide a richer signal**.

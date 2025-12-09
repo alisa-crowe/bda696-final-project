@@ -1,1 +1,0 @@
-We analyzed fan discourse using sentiment scores, discrete emotion labels, and thematic categories for social media posts. Overall, **sentiment tracks performance directionally**, but **emotion and theme information provide a richer signal**.
