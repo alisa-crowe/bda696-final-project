@@ -36,10 +36,15 @@ class ChromaClient:
         try:
             return self.client.get_collection(name=name)
         except Exception:
-            return self.client.create_collection(
-                name=name,
-                metadata=metadata or {}
-            )
+            # Chroma doesn't allow empty metadata dict, so only pass if it has content
+            if metadata and len(metadata) > 0:
+                return self.client.create_collection(
+                    name=name,
+                    metadata=metadata
+                )
+            else:
+                # Create without metadata if it's empty/None
+                return self.client.create_collection(name=name)
 
     def delete_collection(self, name: str) -> None:
         """Delete a collection by name."""
