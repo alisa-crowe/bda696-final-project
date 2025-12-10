@@ -137,17 +137,44 @@ def index_jsonl_file(
                 continue
 
             # Extract text and ID
-            text = doc.get(text_field, "")
-            if not text:
-                continue
-
-            doc_id = doc.get(id_field, f"{file_path.stem}_{line_num}")
+            # For FAQ files, combine question + rag_guide + answer_pattern
+            if collection_name == settings.COLLECTION_FAQ:
+                question = doc.get("question", "")
+                rag_guide = doc.get("rag_guide", "")
+                answer_pattern = doc.get("answer_pattern", "")
+                # Combine into a single text field for embedding
+                text_parts = []
+                if question:
+                    text_parts.append(f"Question: {question}")
+                if rag_guide:
+                    text_parts.append(f"RAG Guide: {rag_guide}")
+                if answer_pattern:
+                    text_parts.append(f"Answer Pattern: {answer_pattern}")
+                text = "\n\n".join(text_parts)
+                if not text:
+                    continue
+                # Use question as ID if no id field
+                doc_id = doc.get(id_field, f"faq_{line_num}")
+            else:
+                text = doc.get(text_field, "")
+                if not text:
+                    continue
+                doc_id = doc.get(id_field, f"{file_path.stem}_{line_num}")
 
             # Extract metadata
             metadata = {
-                "doc_type": doc.get("type", "unknown"),
+                "doc_type": doc.get("type", "faq_entry" if collection_name == settings.COLLECTION_FAQ else "unknown"),
                 "source_file": str(file_path.relative_to(settings.DOCUMENTS_DIR)),
             }
+
+            # For FAQ files, add question and rag_guide to metadata
+            if collection_name == settings.COLLECTION_FAQ:
+                if "question" in doc:
+                    metadata["question"] = doc["question"]
+                if "rag_guide" in doc:
+                    metadata["rag_guide"] = doc["rag_guide"]
+                if "answer_pattern" in doc:
+                    metadata["answer_pattern"] = doc["answer_pattern"]
 
             # Add nested metadata fields
             if "metadata" in doc and isinstance(doc["metadata"], dict):

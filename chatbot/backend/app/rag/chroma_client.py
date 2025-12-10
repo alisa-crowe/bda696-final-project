@@ -36,15 +36,21 @@ class ChromaClient:
         try:
             return self.client.get_collection(name=name)
         except Exception:
-            # Chroma doesn't allow empty metadata dict, so only pass if it has content
-            if metadata and len(metadata) > 0:
-                return self.client.create_collection(
-                    name=name,
-                    metadata=metadata
-                )
-            else:
-                # Create without metadata if it's empty/None
-                return self.client.create_collection(name=name)
+            # Prepare metadata with cosine distance metric for text embeddings
+            collection_metadata = {}
+            if metadata:
+                collection_metadata.update(metadata)
+            
+            # Set cosine distance for better text embedding similarity
+            # ChromaDB uses "hnsw:space" metadata key to specify distance metric
+            # "cosine" = cosine distance (1 - cosine similarity)
+            collection_metadata["hnsw:space"] = "cosine"
+            
+            # Chroma doesn't allow empty metadata dict, so always pass metadata
+            return self.client.create_collection(
+                name=name,
+                metadata=collection_metadata
+            )
 
     def delete_collection(self, name: str) -> None:
         """Delete a collection by name."""
