@@ -2,24 +2,22 @@
 """
 prepare_player_docs.py
 
-Builds player-level summary docs from:
-  - combined-data/combined_team_and_player_data.csv
+Builds clean player-level summary docs from combined_team_and_player_data.csv.
 
-Each JSONL line will look like:
-{
-  "id": "player-shohei-ohtani-lad-2025",
-  "type": "player_summary",
-  "metadata": {...},
-  "text": "Human-readable summary..."
-}
+Each JSONL line represents ONE player with:
+- player_name (from player_name_norm - the actual player ID)
+- team_name (from player_team - the player's actual team)
+- aggregated stats
+- sentiment (if available)
+
+No redundant fields like player_id vs player_name or team_id vs team_name.
 """
-
 import os
 import json
 import argparse
 from typing import List, Dict, Any, Optional
+from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 
@@ -27,44 +25,77 @@ import pandas as pd
 # CONFIG / COLUMN CONSTANTS
 # =========================
 
-# ---- File paths (defaults; can override via CLI) ----
-DEFAULT_COMBINED_PATH = "prepare-documents/combined_team_and_player_data.csv"
-DEFAULT_OUTPUT_PATH = "documents/player_insights/player_docs.jsonl"
+# Get script directory for relative paths
+SCRIPT_DIR = Path(__file__).resolve().parent
+DEFAULT_COMBINED_PATH = str(SCRIPT_DIR / "combined_team_and_player_data.csv")
+DEFAULT_OUTPUT_PATH = str(SCRIPT_DIR.parent / "documents" / "player_insights" / "player_docs.jsonl")
 
-# ---- Identity columns (tweak to match your schema) ----
-COL_PLAYER_NAME = "matched_player"
-COL_PLAYER_NAME_FALLBACK = "player_name"      # e.g., "Shohei Ohtani"
-COL_PLAYER_ID = "player_name_norm"          # if you have a stable id; else we’ll fall back to name
-COL_TEAM_NAME = "team_name"          # team the player is associated with in that row
-COL_TEAM_ID = "team_team_name"          # like "LAD", "ATL" if available
-COL_SEASON = "year"                # e.g., 2025; set to "year" or similar if needed
+# Primary identity columns (use the actual player/team identifiers)
+COL_PLAYER_NAME = "player_name_norm"  # This is the actual player ID/name
+COL_TEAM_NAME = "team_name"  # Full team name (always populated for player rows)
+COL_TEAM_NAME_FALLBACK = "team_team_name"  # Alternative full team name
+COL_TEAM_ABBREV = "player_team"  # Team abbreviation (fallback if needed)
+COL_SEASON = "year_playerrec"  # Season year
 
-# ---- Text / post-level info (optional) ----
-COL_TEXT = "text_playerrec"          # social text column for player posts
+# Team abbreviation to full name mapping
+TEAM_ABBREV_TO_FULL = {
+    "LAD": "Los Angeles Dodgers",
+    "TOR": "Toronto Blue Jays",
+    "CLE": "Cleveland Guardians",
+    "NYY": "New York Yankees",
+    "SEA": "Seattle Mariners",
+    "MIL": "Milwaukee Brewers",
+    "CHC": "Chicago Cubs",
+    "KCR": "Kansas City Royals",
+    "NYM": "New York Mets",
+    "LAA": "Los Angeles Angels",
+    "PHI": "Philadelphia Phillies",
+    "ARI": "Arizona Diamondbacks",
+    "SDP": "San Diego Padres",
+    "CIN": "Cincinnati Reds",
+    "SFG": "San Francisco Giants",
+    "ATL": "Atlanta Braves",
+    "BOS": "Boston Red Sox",
+    "TBR": "Tampa Bay Rays",
+    "BAL": "Baltimore Orioles",
+    "MIN": "Minnesota Twins",
+    "DET": "Detroit Tigers",
+    "HOU": "Houston Astros",
+    "TEX": "Texas Rangers",
+    "OAK": "Oakland Athletics",
+    "STL": "St. Louis Cardinals",
+    "PIT": "Pittsburgh Pirates",
+    "COL": "Colorado Rockies",
+    "MIA": "Miami Marlins",
+    "WSN": "Washington Nationals",
+    "CWS": "Chicago White Sox",
+    "CHW": "Chicago White Sox",
+}
 
-# ---- Performance metric columns (batters) ----
-COL_BATTING_AVG = "player_batting_avg"  # batting average
-COL_HR = "player_home_runs"            # home runs
-COL_RBI = "player_runs_batted_in"      # runs batted in
-COL_OBP = "player_on_base_pct"         # on-base percentage
-COL_SLG = "player_slugging_pct"        # slugging
-COL_OPS = "player_on_base_plus_slugging"  # OPS
+# Text column for counting posts
+COL_TEXT = "text_playerrec"
+
+# Batting stats
+COL_BATTING_AVG = "player_batting_avg"
+COL_HR = "player_home_runs"
+COL_RBI = "player_runs_batted_in"
+COL_OBP = "player_on_base_pct"
+COL_SLG = "player_slugging_pct"
+COL_OPS = "player_on_base_plus_slugging"
 COL_HITS = "player_hits"
 COL_RUNS = "player_runs_scored"
 COL_WALKS = "player_walks"
 COL_STRIKEOUTS = "player_strikeouts"
 COL_WAR = "player_war"
 
-# ---- Pitching metric columns (pitchers) ----
-# Note: Pitching stats not available in current dataset
-COL_ERA = None                        # earned run average
-COL_WHIP = None                       # walks + hits per inning pitched
-COL_K_PER_9 = None                    # strikeouts per 9
-COL_BB_PER_9 = None                   # walks per 9
+# Pitching stats (if available)
+COL_ERA = None  # Not in current dataset
+COL_WHIP = None
+COL_K_PER_9 = None
+COL_BB_PER_9 = None
 
-# ---- Sentiment / emotion / theme columns (only if present) ----
-# Note: These don't exist in combined dataset - would need to merge from team_data_with_themes_final.csv
-COL_SENTIMENT_SCORE = None
+# Sentiment columns (check if they exist)
+COL_SENTIMENT_SCORE = None  # Check if exists
 COL_SENTIMENT_LABEL = None
 COL_EMOTION_LABEL = None
 COL_THEME_LABEL = None
@@ -83,7 +114,7 @@ def slugify(text: str) -> str:
     for ch in text:
         if ch.isalnum():
             out.append(ch)
-        elif ch in (" ", "-", "_"):
+        elif ch in (" ", "-", "_", "."):
             out.append("-")
     slug = "".join(out)
     while "--" in slug:
@@ -92,377 +123,282 @@ def slugify(text: str) -> str:
 
 
 def load_combined(path: str) -> pd.DataFrame:
-    print(f"Loading combined team + player data from: {path}")
-    combined = pd.read_csv(path, low_memory=False)
-    print(f"  -> {len(combined):,} rows")
-
-    # Check for player name column (try matched_player first, then player_name)
-    if COL_PLAYER_NAME not in combined.columns:
-        if COL_PLAYER_NAME_FALLBACK in combined.columns:
-            print(f"  -> Using '{COL_PLAYER_NAME_FALLBACK}' as player name column")
-            # We'll handle this in the grouping logic
-        else:
-            raise KeyError(
-                f"Expected '{COL_PLAYER_NAME}' or '{COL_PLAYER_NAME_FALLBACK}' column in combined CSV. "
-                f"Current columns: {list(combined.columns)[:20]}..."
-            )
+    """Load and filter the combined CSV."""
+    print(f"Loading combined data from: {path}")
+    df = pd.read_csv(path, low_memory=False)
+    print(f"  -> {len(df):,} total rows")
     
-    # Filter to only rows with player mentions
-    if COL_PLAYER_NAME in combined.columns:
-        player_rows = combined[combined[COL_PLAYER_NAME].notna()]
-        print(f"  -> {len(player_rows):,} rows with player mentions")
-        return player_rows
-    elif COL_PLAYER_NAME_FALLBACK in combined.columns:
-        player_rows = combined[combined[COL_PLAYER_NAME_FALLBACK].notna()]
-        print(f"  -> {len(player_rows):,} rows with player mentions")
-        return player_rows
+    # Filter to rows with player data
+    if COL_PLAYER_NAME in df.columns:
+        player_rows = df[df[COL_PLAYER_NAME].notna()].copy()
+        print(f"  -> {len(player_rows):,} rows with player_name_norm")
     else:
-        return combined
+        raise KeyError(f"Column '{COL_PLAYER_NAME}' not found in CSV")
+    
+    return player_rows
 
 
-def value_distribution(series: pd.Series, top_n: int = 5) -> List[Dict[str, Any]]:
-    series = series.dropna()
-    if series.empty:
-        return []
-
-    counts = series.value_counts()
-    total = counts.sum()
-    top_counts = counts.head(top_n)
-
-    dist = []
-    for label, count in top_counts.items():
-        dist.append(
-            {
-                "label": label,
-                "count": int(count),
-                "pct": float(count / total) if total > 0 else 0.0,
-            }
-        )
-    return dist
-
-
-def safe_mean(group: pd.DataFrame, col: str) -> Optional[float]:
-    if col in group.columns:
-        values = pd.to_numeric(group[col], errors="coerce")
-        values = values.dropna()
-        if not values.empty:
-            return float(values.mean())
+def safe_mean(series: pd.Series) -> Optional[float]:
+    """Calculate mean, handling NaN and non-numeric values."""
+    numeric = pd.to_numeric(series, errors='coerce')
+    numeric = numeric.dropna()
+    if len(numeric) > 0:
+        return float(numeric.mean())
     return None
 
 
-def aggregate_player_group(group: pd.DataFrame) -> Dict[str, Any]:
-    """
-    Given all rows for a player group, compute aggregated stats.
+def safe_std(series: pd.Series) -> Optional[float]:
+    """Calculate std dev, handling NaN and non-numeric values."""
+    numeric = pd.to_numeric(series, errors='coerce')
+    numeric = numeric.dropna()
+    if len(numeric) > 1:
+        return float(numeric.std())
+    return None
 
-    Returns dict with:
-      - identity info (player_name, player_id, team_name, team_id, season)
-      - n_posts
-      - batting aggregates where available
-      - sentiment mean/std (if present)
-      - distributions for sentiment/emotion/theme (if present)
+
+def value_distribution(series: pd.Series, top_n: int = 5) -> List[Dict[str, Any]]:
+    """Create distribution of values (for sentiment/emotion/theme labels)."""
+    series = series.dropna()
+    if series.empty:
+        return []
+    
+    counts = series.value_counts()
+    total = counts.sum()
+    top_counts = counts.head(top_n)
+    
+    dist = []
+    for label, count in top_counts.items():
+        dist.append({
+            "label": str(label),
+            "count": int(count),
+            "pct": float(count / total) if total > 0 else 0.0,
+        })
+    return dist
+
+
+def aggregate_player_data(group: pd.DataFrame) -> Dict[str, Any]:
+    """
+    Aggregate all rows for a single player into summary stats.
+    
+    Returns clean dict with:
+    - player_name (from player_name_norm)
+    - team_name (from player_team - most common team)
+    - season (most recent year)
+    - n_posts (count of posts)
+    - batting stats (means)
+    - sentiment stats (if available)
     """
     summary: Dict[str, Any] = {}
-
-    # Identity - use matched_player or fallback to player_name
-    if COL_PLAYER_NAME in group.columns:
-        player_name = group[COL_PLAYER_NAME].iloc[0]
-    elif COL_PLAYER_NAME_FALLBACK in group.columns:
-        player_name = group[COL_PLAYER_NAME_FALLBACK].iloc[0]
-    else:
-        player_name = "Unknown Player"
     
-    player_id = None
-    if COL_PLAYER_ID in group.columns:
-        player_id_vals = group[COL_PLAYER_ID].dropna()
-        if not player_id_vals.empty:
-            player_id = player_id_vals.iloc[0]
+    # Player name (primary identifier)
+    player_name = group[COL_PLAYER_NAME].iloc[0]
+    summary["player_name"] = str(player_name) if pd.notna(player_name) else None
     
-    # Get most common team (since a player might be mentioned across multiple teams)
+    # Team name (prioritize full names, use most common)
     team_name = None
+    
+    # First try: full team name from team_name column
     if COL_TEAM_NAME in group.columns:
-        team_counts = group[COL_TEAM_NAME].value_counts()
+        team_counts = group[COL_TEAM_NAME].dropna()
         if not team_counts.empty:
-            team_name = team_counts.index[0]
+            team_name = str(team_counts.value_counts().index[0])
     
-    team_id = None
-    if COL_TEAM_ID in group.columns:
-        team_id_vals = group[COL_TEAM_ID].dropna()
-        if not team_id_vals.empty:
-            team_id = team_id_vals.iloc[0]
+    # Second try: full team name from team_team_name column
+    if not team_name and COL_TEAM_NAME_FALLBACK in group.columns:
+        team_counts = group[COL_TEAM_NAME_FALLBACK].dropna()
+        if not team_counts.empty:
+            team_name = str(team_counts.value_counts().index[0])
     
-    season = None
+    # Third try: convert abbreviation to full name
+    if not team_name and COL_TEAM_ABBREV in group.columns:
+        abbrev_counts = group[COL_TEAM_ABBREV].dropna()
+        if not abbrev_counts.empty:
+            abbrev = str(abbrev_counts.value_counts().index[0]).strip()
+            # Map abbreviation to full name
+            if abbrev in TEAM_ABBREV_TO_FULL:
+                team_name = TEAM_ABBREV_TO_FULL[abbrev]
+            else:
+                # If abbreviation not in mapping, use it as-is (better than null)
+                team_name = abbrev
+    
+    summary["team_name"] = team_name
+    
+    # Season (most recent year)
     if COL_SEASON in group.columns:
         season_vals = group[COL_SEASON].dropna()
         if not season_vals.empty:
-            season = int(season_vals.iloc[0]) if pd.notna(season_vals.iloc[0]) else None
-
-    summary["player_name"] = player_name
-    summary["player_id"] = player_id
-    summary["team_name"] = team_name
-    summary["team_id"] = team_id
-    summary["season"] = season
-    summary["n_rows"] = int(len(group))
-
-    # Count posts from text_playerrec column
+            # Get most recent season
+            numeric_seasons = pd.to_numeric(season_vals, errors='coerce').dropna()
+            if not numeric_seasons.empty:
+                summary["season"] = int(numeric_seasons.max())
+            else:
+                summary["season"] = None
+        else:
+            summary["season"] = None
+    else:
+        summary["season"] = None
+    
+    # Count posts
     if COL_TEXT in group.columns:
         summary["n_posts"] = int(group[COL_TEXT].notna().sum())
     else:
         summary["n_posts"] = int(len(group))
-
-    # Batting stats
-    summary["batting_avg_mean"] = safe_mean(group, COL_BATTING_AVG) if COL_BATTING_AVG else None
-    summary["hr_mean"] = safe_mean(group, COL_HR) if COL_HR else None
-    summary["rbi_mean"] = safe_mean(group, COL_RBI) if COL_RBI else None
-    summary["obp_mean"] = safe_mean(group, COL_OBP) if COL_OBP else None
-    summary["slg_mean"] = safe_mean(group, COL_SLG) if COL_SLG else None
-    summary["ops_mean"] = safe_mean(group, COL_OPS) if COL_OPS else None
-    summary["hits_mean"] = safe_mean(group, COL_HITS) if COL_HITS else None
-    summary["runs_mean"] = safe_mean(group, COL_RUNS) if COL_RUNS else None
-    summary["walks_mean"] = safe_mean(group, COL_WALKS) if COL_WALKS else None
-    summary["strikeouts_mean"] = safe_mean(group, COL_STRIKEOUTS) if COL_STRIKEOUTS else None
-    summary["war_mean"] = safe_mean(group, COL_WAR) if COL_WAR else None
-
-    # Pitching stats (not available in current dataset)
-    summary["era_mean"] = safe_mean(group, COL_ERA) if COL_ERA else None
-    summary["whip_mean"] = safe_mean(group, COL_WHIP) if COL_WHIP else None
-    summary["k_per_9_mean"] = safe_mean(group, COL_K_PER_9) if COL_K_PER_9 else None
-    summary["bb_per_9_mean"] = safe_mean(group, COL_BB_PER_9) if COL_BB_PER_9 else None
-
-    # Sentiment stats (not available in current dataset)
-    summary["sentiment_avg"] = None
-    summary["sentiment_std"] = None
-    summary["sentiment_dist"] = []
-    summary["emotion_dist"] = []
-    summary["theme_dist"] = []
-
+    
+    summary["n_rows"] = int(len(group))
+    
+    # Batting stats (aggregate means)
+    summary["batting_avg"] = safe_mean(group[COL_BATTING_AVG]) if COL_BATTING_AVG in group.columns else None
+    summary["home_runs"] = safe_mean(group[COL_HR]) if COL_HR in group.columns else None
+    summary["rbi"] = safe_mean(group[COL_RBI]) if COL_RBI in group.columns else None
+    summary["obp"] = safe_mean(group[COL_OBP]) if COL_OBP in group.columns else None
+    summary["slg"] = safe_mean(group[COL_SLG]) if COL_SLG in group.columns else None
+    summary["ops"] = safe_mean(group[COL_OPS]) if COL_OPS in group.columns else None
+    summary["hits"] = safe_mean(group[COL_HITS]) if COL_HITS in group.columns else None
+    summary["runs"] = safe_mean(group[COL_RUNS]) if COL_RUNS in group.columns else None
+    summary["walks"] = safe_mean(group[COL_WALKS]) if COL_WALKS in group.columns else None
+    summary["strikeouts"] = safe_mean(group[COL_STRIKEOUTS]) if COL_STRIKEOUTS in group.columns else None
+    summary["war"] = safe_mean(group[COL_WAR]) if COL_WAR in group.columns else None
+    
+    # Pitching stats (if available)
+    summary["era"] = safe_mean(group[COL_ERA]) if COL_ERA and COL_ERA in group.columns else None
+    summary["whip"] = safe_mean(group[COL_WHIP]) if COL_WHIP and COL_WHIP in group.columns else None
+    summary["k_per_9"] = safe_mean(group[COL_K_PER_9]) if COL_K_PER_9 and COL_K_PER_9 in group.columns else None
+    summary["bb_per_9"] = safe_mean(group[COL_BB_PER_9]) if COL_BB_PER_9 and COL_BB_PER_9 in group.columns else None
+    
+    # Sentiment stats (check if columns exist)
+    if COL_SENTIMENT_SCORE and COL_SENTIMENT_SCORE in group.columns:
+        summary["sentiment_avg"] = safe_mean(group[COL_SENTIMENT_SCORE])
+        summary["sentiment_std"] = safe_std(group[COL_SENTIMENT_SCORE])
+    else:
+        summary["sentiment_avg"] = None
+        summary["sentiment_std"] = None
+    
+    # Sentiment/emotion/theme distributions (check if columns exist)
+    if COL_SENTIMENT_LABEL and COL_SENTIMENT_LABEL in group.columns:
+        summary["sentiment_dist"] = value_distribution(group[COL_SENTIMENT_LABEL])
+    else:
+        summary["sentiment_dist"] = []
+    
+    if COL_EMOTION_LABEL and COL_EMOTION_LABEL in group.columns:
+        summary["emotion_dist"] = value_distribution(group[COL_EMOTION_LABEL])
+    else:
+        summary["emotion_dist"] = []
+    
+    if COL_THEME_LABEL and COL_THEME_LABEL in group.columns:
+        summary["theme_dist"] = value_distribution(group[COL_THEME_LABEL])
+    else:
+        summary["theme_dist"] = []
+    
     return summary
 
 
 def build_player_summary_text(agg: Dict[str, Any]) -> str:
-    """
-    Turn aggregated player dict into a human-readable summary.
-    """
+    """Build human-readable summary text from aggregated stats."""
     player_name = agg.get("player_name") or "Unknown Player"
     team_name = agg.get("team_name")
     season = agg.get("season")
     n_posts = agg.get("n_posts", 0)
-
-    if season is not None:
-        header = f"{player_name} – {season} Player Summary"
-    else:
-        header = f"{player_name} – Overall Player Summary"
-
+    
+    # Header
+    header = f"{player_name}"
+    if season:
+        header += f" – {season}"
+    header += " Player Summary"
     if team_name:
         header += f" ({team_name})"
-
+    
     lines = [header, "-" * len(header)]
-
-    # Batting
-    batting_bits = []
-    avg = agg.get("batting_avg_mean")
-    hr = agg.get("hr_mean")
-    rbi = agg.get("rbi_mean")
-    obp = agg.get("obp_mean")
-    slg = agg.get("slg_mean")
-    ops = agg.get("ops_mean")
-
-    if avg is not None:
-        batting_bits.append(f"batting average around {avg:.3f}")
-    if hr is not None:
-        batting_bits.append(f"typical home run total of {hr:.1f}")
-    if rbi is not None:
-        batting_bits.append(f"average RBI around {rbi:.1f}")
-    hits = agg.get("hits_mean")
-    runs = agg.get("runs_mean")
-    if hits is not None:
-        batting_bits.append(f"average hits around {hits:.1f}")
-    if runs is not None:
-        batting_bits.append(f"average runs scored around {runs:.1f}")
-    if obp is not None or slg is not None or ops is not None:
-        slash_parts = []
-        if obp is not None:
-            slash_parts.append(f"OBP {obp:.3f}")
-        if slg is not None:
-            slash_parts.append(f"SLG {slg:.3f}")
-        if ops is not None:
-            slash_parts.append(f"OPS {ops:.3f}")
-        batting_bits.append(" / ".join(slash_parts))
-    war = agg.get("war_mean")
-    if war is not None:
-        batting_bits.append(f"WAR around {war:.2f}")
-
-    if batting_bits:
-        lines.append("Offensively, the player shows " + "; ".join(batting_bits) + ".")
-
-    # Pitching
-    pitching_bits = []
-    era = agg.get("era_mean")
-    whip = agg.get("whip_mean")
-    k9 = agg.get("k_per_9_mean")
-    bb9 = agg.get("bb_per_9_mean")
-
-    if era is not None:
-        pitching_bits.append(f"ERA around {era:.2f}")
-    if whip is not None:
-        pitching_bits.append(f"WHIP near {whip:.2f}")
-    if k9 is not None:
-        pitching_bits.append(f"{k9:.1f} strikeouts per 9 innings")
-    if bb9 is not None:
-        pitching_bits.append(f"{bb9:.1f} walks per 9 innings")
-
-    if pitching_bits:
-        lines.append("On the mound, the player profiles with " + "; ".join(pitching_bits) + ".")
-
-    # Sentiment
-    sentiment_avg = agg.get("sentiment_avg")
-    sentiment_std = agg.get("sentiment_std")
-    if sentiment_avg is not None:
-        line = (
-            f"Across {n_posts:,} related social posts, the average sentiment score "
-            f"was {sentiment_avg:.3f}"
-        )
+    
+    # Batting stats
+    batting_parts = []
+    if agg.get("batting_avg") is not None:
+        batting_parts.append(f"batting average of {agg['batting_avg']:.3f}")
+    if agg.get("home_runs") is not None:
+        batting_parts.append(f"{agg['home_runs']:.1f} home runs")
+    if agg.get("rbi") is not None:
+        batting_parts.append(f"{agg['rbi']:.1f} RBI")
+    if agg.get("hits") is not None:
+        batting_parts.append(f"{agg['hits']:.1f} hits")
+    if agg.get("runs") is not None:
+        batting_parts.append(f"{agg['runs']:.1f} runs scored")
+    if agg.get("walks") is not None:
+        batting_parts.append(f"{agg['walks']:.1f} walks")
+    if agg.get("strikeouts") is not None:
+        batting_parts.append(f"{agg['strikeouts']:.1f} strikeouts")
+    
+    if batting_parts:
+        lines.append("Batting: " + ", ".join(batting_parts) + ".")
+    
+    # Slash line
+    slash_parts = []
+    if agg.get("obp") is not None:
+        slash_parts.append(f"OBP {agg['obp']:.3f}")
+    if agg.get("slg") is not None:
+        slash_parts.append(f"SLG {agg['slg']:.3f}")
+    if agg.get("ops") is not None:
+        slash_parts.append(f"OPS {agg['ops']:.3f}")
+    
+    if slash_parts:
+        lines.append("Slash line: " + " / ".join(slash_parts) + ".")
+    
+    # WAR
+    if agg.get("war") is not None:
+        lines.append(f"WAR: {agg['war']:.2f}.")
+    
+    # Pitching stats (if available)
+    pitching_parts = []
+    if agg.get("era") is not None:
+        pitching_parts.append(f"ERA {agg['era']:.2f}")
+    if agg.get("whip") is not None:
+        pitching_parts.append(f"WHIP {agg['whip']:.2f}")
+    if agg.get("k_per_9") is not None:
+        pitching_parts.append(f"{agg['k_per_9']:.1f} K/9")
+    if agg.get("bb_per_9") is not None:
+        pitching_parts.append(f"{agg['bb_per_9']:.1f} BB/9")
+    
+    if pitching_parts:
+        lines.append("Pitching: " + ", ".join(pitching_parts) + ".")
+    
+    # Post count
+    lines.append(f"Based on {n_posts:,} social media posts mentioning this player.")
+    
+    # Sentiment (if available)
+    if agg.get("sentiment_avg") is not None:
+        sentiment_avg = agg["sentiment_avg"]
+        sentiment_std = agg.get("sentiment_std")
         if sentiment_std is not None:
-            line += f" (volatility/std ≈ {sentiment_std:.3f})."
+            lines.append(f"Average sentiment: {sentiment_avg:.3f} (std: {sentiment_std:.3f}).")
         else:
-            line += "."
-        lines.append(line)
-    else:
-        lines.append(f"The summary is based on {n_posts:,} rows in the integrated dataset.")
-
-    # Helper to describe distributions
-    def describe_distribution(name: str, dist: List[Dict[str, Any]]) -> Optional[str]:
-        if not dist:
-            return None
-        parts = []
-        for item in dist:
-            label = item["label"]
-            pct = item["pct"]
-            parts.append(f"{label} ({pct*100:.1f}%)")
-        return f"{name} were dominated by " + ", ".join(parts) + "."
-
-    # Sentiment label distribution
-    sent_dist = describe_distribution("Sentiment labels", agg.get("sentiment_dist", []))
-    if sent_dist:
-        lines.append(sent_dist)
-
-    # Emotion distribution
-    emo_dist = describe_distribution("Emotional tone", agg.get("emotion_dist", []))
-    if emo_dist:
-        lines.append(emo_dist)
-
-    # Theme distribution
-    theme_dist = describe_distribution("Content themes", agg.get("theme_dist", []))
-    if theme_dist:
-        lines.append(theme_dist)
-
+            lines.append(f"Average sentiment: {sentiment_avg:.3f}.")
+    
+    # Distributions (if available)
+    if agg.get("sentiment_dist"):
+        dist = agg["sentiment_dist"]
+        parts = [f"{item['label']} ({item['pct']*100:.1f}%)" for item in dist[:3]]
+        lines.append(f"Sentiment distribution: {', '.join(parts)}.")
+    
+    if agg.get("emotion_dist"):
+        dist = agg["emotion_dist"]
+        parts = [f"{item['label']} ({item['pct']*100:.1f}%)" for item in dist[:3]]
+        lines.append(f"Emotion distribution: {', '.join(parts)}.")
+    
+    if agg.get("theme_dist"):
+        dist = agg["theme_dist"]
+        parts = [f"{item['label']} ({item['pct']*100:.1f}%)" for item in dist[:3]]
+        lines.append(f"Theme distribution: {', '.join(parts)}.")
+    
     lines.append(
-        "This summary captures how on-field performance and fan conversation "
-        "around this player interact, for retrieval-augmented analysis."
+        "This summary provides player performance metrics and fan sentiment "
+        "for retrieval-augmented analysis."
     )
-
+    
     return "\n".join(lines)
 
 
-def group_and_summarize(
-    combined: pd.DataFrame,
-    group_by_team: bool = False,  # Changed default: group by player only to get ALL players
-    group_by_season: bool = False,  # Changed default: don't split by season
-) -> List[Dict[str, Any]]:
-    """
-    Group combined dataframe by player (optionally team + season),
-    aggregate stats, and build JSONL-ready docs.
-    
-    By default, groups by player only to include ALL unique players mentioned.
-    """
-    # Determine which player name column to use
-    if COL_PLAYER_NAME in combined.columns:
-        player_col = COL_PLAYER_NAME
-    elif COL_PLAYER_NAME_FALLBACK in combined.columns:
-        player_col = COL_PLAYER_NAME_FALLBACK
-    else:
-        raise ValueError(f"Neither {COL_PLAYER_NAME} nor {COL_PLAYER_NAME_FALLBACK} found in columns")
-    
-    group_cols = [player_col]
-
-    if group_by_team and COL_TEAM_NAME in combined.columns:
-        group_cols.append(COL_TEAM_NAME)
-    if group_by_season and COL_SEASON in combined.columns:
-        group_cols.append(COL_SEASON)
-
-    print(f"Grouping by columns: {group_cols}")
-    print(f"  -> Total unique players: {combined[player_col].nunique():,}")
-    docs: List[Dict[str, Any]] = []
-
-    for keys, group in combined.groupby(group_cols):
-        if not isinstance(keys, tuple):
-            keys = (keys,)
-
-        agg = aggregate_player_group(group)
-        text = build_player_summary_text(agg)
-
-        # Build ID: player slug only (no team/season to avoid duplicates)
-        player_name = agg.get("player_name") or "unknown-player"
-        player_slug = slugify(player_name)
-        
-        # Only include team/season in ID if grouping by them
-        parts = ["player", player_slug]
-        if group_by_team:
-            team_id = agg.get("team_id") or agg.get("team_name")
-            team_slug = slugify(team_id) if team_id is not None else None
-            if team_slug:
-                parts.append(team_slug)
-        if group_by_season:
-            season = agg.get("season")
-            if season is not None and not (isinstance(season, float) and np.isnan(season)):
-                parts.append(str(season))
-        doc_id = "-".join(parts)
-
-        metadata = {
-            "player_name": agg.get("player_name"),
-            "player_id": agg.get("player_id"),
-            "team_name": agg.get("team_name"),
-            "team_id": agg.get("team_id"),
-            "season": agg.get("season"),
-            "n_rows": agg.get("n_rows"),
-            "n_posts": agg.get("n_posts"),
-            "batting_avg_mean": agg.get("batting_avg_mean"),
-            "hr_mean": agg.get("hr_mean"),
-            "rbi_mean": agg.get("rbi_mean"),
-            "obp_mean": agg.get("obp_mean"),
-            "slg_mean": agg.get("slg_mean"),
-            "ops_mean": agg.get("ops_mean"),
-            "hits_mean": agg.get("hits_mean"),
-            "runs_mean": agg.get("runs_mean"),
-            "walks_mean": agg.get("walks_mean"),
-            "strikeouts_mean": agg.get("strikeouts_mean"),
-            "war_mean": agg.get("war_mean"),
-            "era_mean": agg.get("era_mean"),
-            "whip_mean": agg.get("whip_mean"),
-            "k_per_9_mean": agg.get("k_per_9_mean"),
-            "bb_per_9_mean": agg.get("bb_per_9_mean"),
-            "sentiment_avg": agg.get("sentiment_avg"),
-            "sentiment_std": agg.get("sentiment_std"),
-            "sentiment_dist": agg.get("sentiment_dist"),
-            "emotion_dist": agg.get("emotion_dist"),
-            "theme_dist": agg.get("theme_dist"),
-        }
-
-        doc = {
-            "id": doc_id,
-            "type": "player_summary",
-            "metadata": metadata,
-            "text": text,
-        }
-        docs.append(doc)
-
-    print(f"Created {len(docs):,} player summary docs.")
-    return docs
-
-
 def to_builtin(obj):
-    """Recursively convert numpy / pandas types to plain Python types for JSON."""
+    """Convert numpy/pandas types to plain Python types for JSON."""
     import numpy as np
-
+    
     if isinstance(obj, dict):
         return {k: to_builtin(v) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -473,63 +409,149 @@ def to_builtin(obj):
         return float(obj)
     elif isinstance(obj, (np.bool_,)):
         return bool(obj)
+    elif pd.isna(obj):
+        return None
     else:
         return obj
 
 
-def write_jsonl(docs: List[Dict[str, Any]], output_path: str) -> None:
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+def generate_player_docs(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """
+    Generate one document per unique player.
+    
+    Groups by player_name_norm (the actual player identifier) and aggregates all their data.
+    """
+    print(f"\nGenerating player documents...")
+    print(f"  -> Grouping by: {COL_PLAYER_NAME}")
+    
+    # Group by player name only (one doc per player)
+    grouped = df.groupby(COL_PLAYER_NAME)
+    print(f"  -> Found {len(grouped):,} unique players")
+    
+    docs: List[Dict[str, Any]] = []
+    skipped = 0
+    
+    for player_name, group in grouped:
+        # Skip if player name is invalid
+        if pd.isna(player_name) or str(player_name).strip() == "":
+            skipped += 1
+            continue
+        
+        # Aggregate stats for this player
+        agg = aggregate_player_data(group)
+        
+        # Build summary text
+        text = build_player_summary_text(agg)
+        
+        # Generate document ID
+        player_slug = slugify(str(player_name))
+        doc_id = f"player-{player_slug}"
+        
+        # Clean metadata (only include non-None values)
+        metadata = {
+            "player_name": agg["player_name"],
+            "team_name": agg["team_name"],
+            "season": agg["season"],
+            "n_posts": agg["n_posts"],
+            "n_rows": agg["n_rows"],
+        }
+        
+        # Add stats (only if not None)
+        if agg.get("batting_avg") is not None:
+            metadata["batting_avg"] = agg["batting_avg"]
+        if agg.get("home_runs") is not None:
+            metadata["home_runs"] = agg["home_runs"]
+        if agg.get("rbi") is not None:
+            metadata["rbi"] = agg["rbi"]
+        if agg.get("obp") is not None:
+            metadata["obp"] = agg["obp"]
+        if agg.get("slg") is not None:
+            metadata["slg"] = agg["slg"]
+        if agg.get("ops") is not None:
+            metadata["ops"] = agg["ops"]
+        if agg.get("hits") is not None:
+            metadata["hits"] = agg["hits"]
+        if agg.get("runs") is not None:
+            metadata["runs"] = agg["runs"]
+        if agg.get("walks") is not None:
+            metadata["walks"] = agg["walks"]
+        if agg.get("strikeouts") is not None:
+            metadata["strikeouts"] = agg["strikeouts"]
+        if agg.get("war") is not None:
+            metadata["war"] = agg["war"]
+        
+        # Add sentiment (if available)
+        if agg.get("sentiment_avg") is not None:
+            metadata["sentiment_avg"] = agg["sentiment_avg"]
+        if agg.get("sentiment_std") is not None:
+            metadata["sentiment_std"] = agg["sentiment_std"]
+        if agg.get("sentiment_dist"):
+            metadata["sentiment_dist"] = agg["sentiment_dist"]
+        if agg.get("emotion_dist"):
+            metadata["emotion_dist"] = agg["emotion_dist"]
+        if agg.get("theme_dist"):
+            metadata["theme_dist"] = agg["theme_dist"]
+        
+        doc = {
+            "id": doc_id,
+            "type": "player_summary",
+            "metadata": metadata,
+            "text": text,
+        }
+        
+        docs.append(doc)
+    
+    print(f"  -> Created {len(docs):,} player documents")
+    if skipped > 0:
+        print(f"  -> Skipped {skipped:,} invalid entries")
+    
+    return docs
 
-    print(f"Writing JSONL to: {output_path}")
-    with open(output_path, "w", encoding="utf-8") as f:
+
+def write_jsonl(docs: List[Dict[str, Any]], output_path: str) -> None:
+    """Write documents to JSONL file."""
+    output_file = Path(output_path)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    
+    print(f"\nWriting JSONL to: {output_path}")
+    with open(output_file, "w", encoding="utf-8") as f:
         for doc in docs:
             safe_doc = to_builtin(doc)
             line = json.dumps(safe_doc, ensure_ascii=False)
             f.write(line + "\n")
-    print("Done.")
+    print(f"Done. Wrote {len(docs):,} documents.")
 
 
 # =========================
-# MAIN / CLI
+# MAIN
 # =========================
 
-def parse_args() -> argparse.Namespace:
+def main():
     parser = argparse.ArgumentParser(
-        description="Prepare player-level summary docs for RAG from combined CSV."
+        description="Generate clean player summary documents from combined CSV."
     )
     parser.add_argument(
         "--combined-csv",
         default=DEFAULT_COMBINED_PATH,
-        help=f"Path to combined team+player+posts CSV (default: {DEFAULT_COMBINED_PATH})",
+        help=f"Path to combined CSV (default: {DEFAULT_COMBINED_PATH})",
     )
     parser.add_argument(
         "--output-jsonl",
         default=DEFAULT_OUTPUT_PATH,
         help=f"Output JSONL path (default: {DEFAULT_OUTPUT_PATH})",
     )
-    parser.add_argument(
-        "--no-team",
-        action="store_true",
-        help="If set, do NOT group by team; group by player (and season) only.",
-    )
-    parser.add_argument(
-        "--no-season",
-        action="store_true",
-        help="If set, do NOT group by season; group by player (and optional team) only.",
-    )
-    return parser.parse_args()
-
-
-def main():
-    args = parse_args()
-
-    combined = load_combined(args.combined_csv)
-    docs = group_and_summarize(
-        combined,
-        group_by_team=args.no_team,  # Inverted: --no-team means group_by_team=False
-        group_by_season=args.no_season,  # Inverted: --no-season means group_by_season=False
-    )
+    args = parser.parse_args()
+    
+    # Load data
+    df = load_combined(args.combined_csv)
+    
+    # Generate documents
+    docs = generate_player_docs(df)
+    
+    # Write output
     write_jsonl(docs, args.output_jsonl)
+    
+    print("\n✅ Player documents generated successfully!")
 
 
 if __name__ == "__main__":
