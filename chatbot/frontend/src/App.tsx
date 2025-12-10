@@ -131,10 +131,9 @@ function App() {
               </p>
               <div className="flex flex-wrap gap-2 justify-center">
                 {[
-                  'Which teams have the most positive fanbases?',
-                  'What is WAR?',
-                  'Tell me about the Atlanta Braves',
-                  'How are sentiment scores calculated?',
+                  'Tell me about the San Diego Padres.',
+                  'Which MLB team has the most positive fans?',
+                  'What does ERA mean?',
                 ].map((example, idx) => (
                   <button
                     key={idx}
