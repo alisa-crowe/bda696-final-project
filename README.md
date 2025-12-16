@@ -97,4 +97,5 @@ See `chatbot/QUICKSTART.md` for detailed chatbot setup instructions.
 
 ## Paper
 
-See "Final Paper.docx" for the complete research paper documenting methodology, results, and conclusions.
+See "Final Paper.pdf" for the complete research paper documenting methodology, results, and conclusions.
+
